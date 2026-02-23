@@ -53,8 +53,6 @@ See `DISCLAIMER.md`.
 
 ## Security / privacy
 
-- Don’t commit secrets (tokens, headers, captured traffic). This integration is designed so tokens come from config flow and are stored by Home Assistant.
-- If you plan to open-source a fork, review and scrub anything environment-specific first (IPs, hostnames, debug captures).
 - This project was vibe coded with OpenAI Codex. Please treat it as an unofficial community integration and verify behavior in your environment before relying on it for critical automations.
 
 ## Issues
