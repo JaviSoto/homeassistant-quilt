@@ -44,16 +44,13 @@ See `DISCLAIMER.md`.
 
 - Not affiliated with Quilt; no official support.
 - Some advanced HVAC features may not map perfectly to HA/HomeKit UX (for example, fan speed/mode).
+- This project was vibe coded with OpenAI Codex. Please treat it as an unofficial community integration and verify behavior in your environment before relying on it for critical automations.
 
 ## Development
 
 - Run unit tests + coverage:
   - `uv run --with-requirements requirements-dev.txt -- coverage run -m pytest`
   - `uv run --with-requirements requirements-dev.txt -- coverage report --fail-under=85`
-
-## Security / privacy
-
-- This project was vibe coded with OpenAI Codex. Please treat it as an unofficial community integration and verify behavior in your environment before relying on it for critical automations.
 
 ## Issues
 
