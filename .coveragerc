@@ -1,0 +1,18 @@
+[run]
+branch = True
+source =
+    custom_components/quilt
+omit =
+    custom_components/quilt/__init__.py
+    custom_components/quilt/climate.py
+    custom_components/quilt/fan.py
+    custom_components/quilt/light.py
+    custom_components/quilt/notifier.py
+
+[report]
+show_missing = True
+skip_covered = True
+exclude_lines =
+    pragma: no cover
+    if TYPE_CHECKING:
+    raise NotImplementedError

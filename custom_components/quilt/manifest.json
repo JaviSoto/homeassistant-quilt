@@ -1,0 +1,10 @@
+{
+  "domain": "quilt",
+  "name": "Quilt (Unofficial)",
+  "codeowners": ["@JaviSoto"],
+  "config_flow": true,
+  "documentation": "https://github.com/JaviSoto/homeassistant-quilt",
+  "iot_class": "cloud_polling",
+  "issue_tracker": "https://github.com/JaviSoto/homeassistant-quilt/issues",
+  "version": "0.1.5"
+}

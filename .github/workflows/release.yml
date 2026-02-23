@@ -1,0 +1,25 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build release zip
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y zip
+          chmod +x ./scripts/build_release_zip.sh
+          ./scripts/build_release_zip.sh ./quilt.zip
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: quilt.zip
+

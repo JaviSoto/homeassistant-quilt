@@ -1,0 +1,52 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to Quilt",
+        "description": "Enter your Quilt account email. Quilt will send you a verification code.\n\nThis is an **unofficial** integration. See the repository `DISCLAIMER.md` for details.",
+        "data": {
+          "email": "Email",
+          "accept_terms": "I understand this is unofficial and I accept the disclaimer"
+        }
+      },
+      "code": {
+        "title": "Enter verification code",
+        "description": "Enter the verification code Quilt emailed to you.",
+        "data": {
+          "code": "Verification code"
+        }
+      },
+      "reauth": {
+        "title": "Re-authenticate with Quilt",
+        "description": "Quilt requires you to re-authenticate. We’ll email you a new verification code."
+      },
+      "reauth_code": {
+        "title": "Enter verification code",
+        "description": "Enter the verification code Quilt emailed to you.",
+        "data": {
+          "code": "Verification code"
+        }
+      }
+    },
+    "error": {
+      "accept_terms": "Please confirm you accept the disclaimer to continue.",
+      "auth_failed": "Authentication failed. Please try again.",
+      "invalid_code": "Invalid code. Please try again.",
+      "unknown": "Unexpected error. Please try again."
+    },
+    "abort": {
+      "reauth_successful": "Re-authentication successful."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Quilt options",
+        "data": {
+          "enable_notifier": "Enable real-time updates (notifier stream)"
+        }
+      }
+    }
+  }
+}
+

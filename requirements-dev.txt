@@ -1,0 +1,5 @@
+pytest==8.3.4
+coverage==7.6.10
+aiohttp==3.11.11
+grpcio==1.70.0
+voluptuous==0.15.2
