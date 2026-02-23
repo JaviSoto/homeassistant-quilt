@@ -1,7 +1,6 @@
 {
   "name": "Quilt (Unofficial)",
   "content_in_root": false,
-  "domains": ["quilt"],
   "homeassistant": "2024.6.0",
   "render_readme": true,
   "zip_release": true,
