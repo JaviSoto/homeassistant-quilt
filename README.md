@@ -17,6 +17,8 @@ This is a normal HACS custom integration repository.
 
 Maintainer note: I have been using this integration in my own Home Assistant setup for a couple of months, and it has been working great.
 
+Brand assets follow Home Assistant 2026.3+ custom integration guidance and are shipped in `custom_components/quilt/brand/`.
+
 - **HACS (Custom repository)**: add this repo as a custom integration repo in HACS, then install “Quilt”.
   - HACS → Integrations → (⋮) → **Custom repositories** → add `JaviSoto/homeassistant-quilt` as category **Integration**.
 - **Manual**: copy `custom_components/quilt/` into your Home Assistant `/config/custom_components/quilt/`, then restart HA Core.
