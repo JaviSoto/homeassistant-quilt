@@ -10,6 +10,12 @@ Thanks for considering contributing!
   - anything under `**/secrets/`
 - Keep changes focused and testable.
 - Prefer adding unit tests for protocol parsing/encoding and config flow behavior.
+- Agent-owned repo hygiene: if you find the working tree dirty while working
+  here, inspect the diff, classify what is valid, obsolete, generated, or
+  unrelated, and leave the repository better than you found it. Do not stop with
+  “there were pending edits, so I left it uncommitted”; commit and push coherent
+  validated changes, discard obvious generated junk, and only escalate when the
+  intended semantics are genuinely ambiguous.
 
 ## Development setup
 

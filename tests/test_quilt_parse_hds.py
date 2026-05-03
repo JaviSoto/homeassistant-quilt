@@ -1,7 +1,14 @@
 from __future__ import annotations
 
-from custom_components.quilt.proto_wire import encode_bytes_field, encode_fixed32_float, encode_varint_field
-from custom_components.quilt.quilt_parse import parse_get_home_datastore_system_response, parse_list_systems_response
+from custom_components.quilt.proto_wire import (
+    encode_bytes_field,
+    encode_fixed32_float,
+    encode_varint_field,
+)
+from custom_components.quilt.quilt_parse import (
+    parse_get_home_datastore_system_response,
+    parse_list_systems_response,
+)
 
 
 def _ts(sec: int = 1700000000, ns: int = 123) -> bytes:
@@ -33,9 +40,12 @@ def test_parse_get_home_datastore_system_response_minimal() -> None:
     cs_active_id = "cs-active"
     cs_off_id = "cs-off"
     indoor_unit_id = "iu-1"
+    controller_id = "controller-1"
 
     # Space header/settings/controls/state
-    header = encode_bytes_field(1, space_id.encode("utf-8")) + encode_bytes_field(4, system_id.encode("utf-8"))
+    header = encode_bytes_field(1, space_id.encode("utf-8")) + encode_bytes_field(
+        4, system_id.encode("utf-8")
+    )
     settings = encode_bytes_field(1, b"Office") + encode_bytes_field(4, b"UTC")
     controls = b"".join(
         [
@@ -69,7 +79,9 @@ def test_parse_get_home_datastore_system_response_minimal() -> None:
 
     # Comfort setting messages (Active/Off)
     def cs_msg(cs_id: str, name: str) -> bytes:
-        cs_header = encode_bytes_field(1, cs_id.encode("utf-8")) + encode_bytes_field(4, system_id.encode("utf-8"))
+        cs_header = encode_bytes_field(1, cs_id.encode("utf-8")) + encode_bytes_field(
+            4, system_id.encode("utf-8")
+        )
         attrs = b"".join(
             [
                 encode_bytes_field(1, _ts()),
@@ -84,11 +96,19 @@ def test_parse_get_home_datastore_system_response_minimal() -> None:
                 encode_fixed32_float(10, 0.0),
             ]
         )
-        rel = encode_bytes_field(1, _ts()) + encode_bytes_field(2, space_id.encode("utf-8"))
-        return encode_bytes_field(1, cs_header) + encode_bytes_field(2, attrs) + encode_bytes_field(3, rel)
+        rel = encode_bytes_field(1, _ts()) + encode_bytes_field(
+            2, space_id.encode("utf-8")
+        )
+        return (
+            encode_bytes_field(1, cs_header)
+            + encode_bytes_field(2, attrs)
+            + encode_bytes_field(3, rel)
+        )
 
     # Indoor unit object (field 9 in top-level)
-    iu_header = encode_bytes_field(1, indoor_unit_id.encode("utf-8")) + encode_bytes_field(4, system_id.encode("utf-8"))
+    iu_header = encode_bytes_field(
+        1, indoor_unit_id.encode("utf-8")
+    ) + encode_bytes_field(4, system_id.encode("utf-8"))
     iu_rel = b"".join([encode_bytes_field(2, space_id.encode("utf-8"))])
     iu_controls = b"".join(
         [
@@ -102,7 +122,32 @@ def test_parse_get_home_datastore_system_response_minimal() -> None:
             encode_varint_field(12, 4),
         ]
     )
-    iu_msg = encode_bytes_field(1, iu_header) + encode_bytes_field(2, iu_rel) + encode_bytes_field(4, iu_controls)
+    iu_state = (
+        encode_bytes_field(1, _ts())
+        + encode_fixed32_float(3, 17.0)
+        + encode_fixed32_float(9, 22.75)
+    )
+    iu_msg = (
+        encode_bytes_field(1, iu_header)
+        + encode_bytes_field(2, iu_rel)
+        + encode_bytes_field(4, iu_controls)
+        + encode_bytes_field(5, iu_state)
+    )
+
+    controller_header = encode_bytes_field(
+        1, controller_id.encode("utf-8")
+    ) + encode_bytes_field(4, system_id.encode("utf-8"))
+    controller_rel = encode_bytes_field(2, space_id.encode("utf-8"))
+    controller_settings = encode_bytes_field(1, b"Dial QD1")
+    controller_state = encode_fixed32_float(5, 24.5) + encode_bytes_field(15, _ts())
+    controller_msg = b"".join(
+        [
+            encode_bytes_field(1, controller_header),
+            encode_bytes_field(2, controller_rel),
+            encode_bytes_field(3, controller_settings),
+            encode_bytes_field(4, controller_state),
+        ]
+    )
 
     top = b"".join(
         [
@@ -110,6 +155,7 @@ def test_parse_get_home_datastore_system_response_minimal() -> None:
             encode_bytes_field(13, cs_msg(cs_active_id, "Active")),
             encode_bytes_field(13, cs_msg(cs_off_id, "Off")),
             encode_bytes_field(9, iu_msg),
+            encode_bytes_field(11, controller_msg),
         ]
     )
 
@@ -117,7 +163,55 @@ def test_parse_get_home_datastore_system_response_minimal() -> None:
     assert hds.system_id == system_id
     assert space_id in hds.spaces
     assert indoor_unit_id in hds.indoor_units
-    assert hds.indoor_units_by_space[space_id][0].header.indoor_unit_id == indoor_unit_id
+    assert (
+        hds.indoor_units_by_space[space_id][0].header.indoor_unit_id == indoor_unit_id
+    )
+    assert hds.indoor_units[indoor_unit_id].state is not None
+    assert hds.indoor_units[indoor_unit_id].state.ambient_c == 22.75
+    assert hds.controllers[controller_id].state is not None
+    assert hds.controllers[controller_id].state.ambient_c == 24.5
+    assert hds.controllers_by_space[space_id][0].header.controller_id == controller_id
     assert cs_active_id in hds.comfort_settings
     assert hds.comfort_settings_by_space[space_id]
 
+
+def test_space_and_indoor_unit_online_follow_five_minute_freshness_rule() -> None:
+    system_id = "sys-1"
+    space_id = "space-1"
+    indoor_unit_id = "iu-1"
+    fresh_ts = 1_000
+    stale_ts = 100
+
+    header = encode_bytes_field(1, space_id.encode("utf-8")) + encode_bytes_field(
+        4, system_id.encode("utf-8")
+    )
+    settings = encode_bytes_field(1, b"Office") + encode_bytes_field(4, b"UTC")
+    stale_space_state = encode_bytes_field(1, _ts(stale_ts))
+    space_msg = b"".join(
+        [
+            encode_bytes_field(1, header),
+            encode_bytes_field(3, settings),
+            encode_bytes_field(5, stale_space_state),
+        ]
+    )
+
+    iu_header = encode_bytes_field(
+        1, indoor_unit_id.encode("utf-8")
+    ) + encode_bytes_field(4, system_id.encode("utf-8"))
+    iu_rel = encode_bytes_field(2, space_id.encode("utf-8"))
+    fresh_iu_state = encode_bytes_field(1, _ts(fresh_ts))
+    iu_msg = b"".join(
+        [
+            encode_bytes_field(1, iu_header),
+            encode_bytes_field(2, iu_rel),
+            encode_bytes_field(5, fresh_iu_state),
+        ]
+    )
+
+    hds = parse_get_home_datastore_system_response(
+        encode_bytes_field(3, space_msg) + encode_bytes_field(9, iu_msg)
+    )
+    assert hds.indoor_unit_is_online(indoor_unit_id, now_seconds=fresh_ts + 60)
+    assert hds.space_is_online(space_id, now_seconds=fresh_ts + 60)
+    assert not hds.indoor_unit_is_online(indoor_unit_id, now_seconds=fresh_ts + 301)
+    assert not hds.space_is_online(space_id, now_seconds=fresh_ts + 301)

@@ -36,22 +36,32 @@ def _find_active_comfort(hds, *, space_id: str) -> QuiltComfortSetting | None:
     return None
 
 
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
+async def async_setup_entry(
+    hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
+) -> None:
     api: QuiltApi = hass.data[DOMAIN][entry.entry_id]["api"]
     systems: list[QuiltSystemInfo] = hass.data[DOMAIN][entry.entry_id]["systems"]
-    coordinators: dict[str, QuiltCoordinator] = hass.data[DOMAIN][entry.entry_id]["coordinators"]
+    coordinators: dict[str, QuiltCoordinator] = hass.data[DOMAIN][entry.entry_id][
+        "coordinators"
+    ]
 
     entities: list[QuiltFan] = []
     for sysinfo in systems:
         coordinator = coordinators[sysinfo.system_id]
         if coordinator.data is None:
-            _LOGGER.warning("Quilt coordinator has no data for %s; skipping fan entity setup", sysinfo.system_id)
+            _LOGGER.warning(
+                "Quilt coordinator has no data for %s; skipping fan entity setup",
+                sysinfo.system_id,
+            )
             continue
 
         for space in coordinator.data.hds.spaces.values():
             if not space.settings.name:
                 continue
-            if space.relationships_parent_space_id is None and space.settings.name == coordinator.data.system.name:
+            if (
+                space.relationships_parent_space_id is None
+                and space.settings.name == coordinator.data.system.name
+            ):
                 continue
             entities.append(
                 QuiltFan(
@@ -104,6 +114,15 @@ class QuiltFan(CoordinatorEntity[QuiltCoordinator], FanEntity):
     @property
     def name(self) -> str | None:
         return f"{self._space_name} Fan"
+
+    @property
+    def available(self) -> bool:
+        data = self.coordinator.data
+        return bool(
+            self.coordinator.last_update_success
+            and data is not None
+            and data.hds.space_is_online(self._space_id)
+        )
 
     @property
     def device_info(self) -> DeviceInfo | None:

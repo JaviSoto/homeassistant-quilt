@@ -11,12 +11,18 @@ from custom_components.quilt.quilt_parse import (
     QuiltComfortSettingAttributes,
     QuiltComfortSettingHeader,
     QuiltComfortSettingRelationships,
+    QuiltController,
+    QuiltControllerHeader,
+    QuiltControllerRelationships,
+    QuiltControllerSettings,
+    QuiltControllerState,
     QuiltEnergyMetricBucket,
     QuiltHdsSystem,
     QuiltIndoorUnit,
     QuiltIndoorUnitControls,
     QuiltIndoorUnitHeader,
     QuiltIndoorUnitRelationships,
+    QuiltIndoorUnitState,
     QuiltSpace,
     QuiltSpaceControls,
     QuiltSpaceEnergyMetrics,
@@ -26,11 +32,17 @@ from custom_components.quilt.quilt_parse import (
     QuiltSystemInfo,
     QuiltTimestamp,
 )
-from custom_components.quilt.select import QuiltLouverModeSelect, async_setup_entry as select_setup_entry
+from custom_components.quilt.select import (
+    QuiltLouverModeSelect,
+    async_setup_entry as select_setup_entry,
+)
 from custom_components.quilt.sensor import (
+    QuiltControllerAmbientTemperatureSensor,
+    QuiltIndoorUnitAmbientTemperatureSensor,
     QuiltSpaceEnergySensor,
     _is_real_space,
     _safe_zoneinfo,
+    async_setup_entry as sensor_setup_entry,
 )
 
 
@@ -38,7 +50,9 @@ class _FakeApi:
     def __init__(self) -> None:
         self.calls: list[bytes] = []
 
-    async def async_update_indoor_unit(self, *, indoor_unit_message: bytes) -> bytes:  # noqa: ANN001
+    async def async_update_indoor_unit(
+        self, *, indoor_unit_message: bytes
+    ) -> bytes:  # noqa: ANN001
         self.calls.append(indoor_unit_message)
         return b""
 
@@ -46,6 +60,7 @@ class _FakeApi:
 class _FakeCoordinator:
     def __init__(self, data) -> None:  # noqa: ANN001
         self.data = data
+        self.last_update_success = True
         from homeassistant.core import HomeAssistant
 
         self.hass = HomeAssistant()
@@ -64,7 +79,9 @@ def _mk_space(
     ambient_c: float | None = 21.0,
 ) -> QuiltSpace:
     return QuiltSpace(
-        header=QuiltSpaceHeader(space_id=space_id, created=None, updated=None, system_id=system_id),
+        header=QuiltSpaceHeader(
+            space_id=space_id, created=None, updated=None, system_id=system_id
+        ),
         relationships_parent_space_id=None if root else "root",
         settings=QuiltSpaceSettings(name=name, timezone="UTC"),
         controls=QuiltSpaceControls(
@@ -77,13 +94,26 @@ def _mk_space(
             comfort_setting_override=None,
             comfort_setting_id="cs-active",
         ),
-        state=QuiltSpaceState(updated=None, setpoint_c=20.0, ambient_c=ambient_c, hvac_state=2, comfort_setting_id="cs-active"),
+        state=QuiltSpaceState(
+            updated=None,
+            setpoint_c=20.0,
+            ambient_c=ambient_c,
+            hvac_state=2,
+            comfort_setting_id="cs-active",
+        ),
     )
 
 
-def _mk_comfort(*, system_id: str, space_id: str, name: str, louver_mode: int, louver_pos: float) -> QuiltComfortSetting:
+def _mk_comfort(
+    *, system_id: str, space_id: str, name: str, louver_mode: int, louver_pos: float
+) -> QuiltComfortSetting:
     return QuiltComfortSetting(
-        header=QuiltComfortSettingHeader(comfort_setting_id=f"cs-{name.lower()}", created=None, updated=None, system_id=system_id),
+        header=QuiltComfortSettingHeader(
+            comfort_setting_id=f"cs-{name.lower()}",
+            created=None,
+            updated=None,
+            system_id=system_id,
+        ),
         attributes=QuiltComfortSettingAttributes(
             updated=None,
             name=name,
@@ -100,15 +130,25 @@ def _mk_comfort(*, system_id: str, space_id: str, name: str, louver_mode: int, l
     )
 
 
-def _mk_select(*, iu_louver_mode: int | None, iu_louver_pos: float | None) -> tuple[QuiltLouverModeSelect, _FakeApi]:
+def _mk_select(
+    *, iu_louver_mode: int | None, iu_louver_pos: float | None
+) -> tuple[QuiltLouverModeSelect, _FakeApi]:
     system_id = "sys-1"
     space_id = "space-office"
     system = QuiltSystemInfo(system_id=system_id, name="Home", timezone="UTC")
     office = _mk_space(system_id=system_id, space_id=space_id, name="Office")
-    cs_active = _mk_comfort(system_id=system_id, space_id=space_id, name="Active", louver_mode=3, louver_pos=0.74)
+    cs_active = _mk_comfort(
+        system_id=system_id,
+        space_id=space_id,
+        name="Active",
+        louver_mode=3,
+        louver_pos=0.74,
+    )
 
     iu = QuiltIndoorUnit(
-        header=QuiltIndoorUnitHeader(indoor_unit_id="iu-1", created=None, updated=None, system_id=system_id),
+        header=QuiltIndoorUnitHeader(
+            indoor_unit_id="iu-1", created=None, updated=None, system_id=system_id
+        ),
         relationships=QuiltIndoorUnitRelationships(space_id=space_id),
         controls=QuiltIndoorUnitControls(
             updated=None,
@@ -136,7 +176,13 @@ def _mk_select(*, iu_louver_mode: int | None, iu_louver_pos: float | None) -> tu
 
     api = _FakeApi()
     coordinator = _FakeCoordinator(data=type("D", (), {"system": system, "hds": hds})())
-    ent = QuiltLouverModeSelect(coordinator=coordinator, api=api, system_id=system_id, space_id=space_id, space_name="Office")
+    ent = QuiltLouverModeSelect(
+        coordinator=coordinator,
+        api=api,
+        system_id=system_id,
+        space_id=space_id,
+        space_name="Office",
+    )
     return ent, api
 
 
@@ -166,7 +212,13 @@ def test_louver_async_setup_entry_filters_non_real_spaces() -> None:
     system = QuiltSystemInfo(system_id="sys-1", name="Home", timezone="UTC")
     real = _mk_space(system_id="sys-1", space_id="space-1", name="Office")
     root = _mk_space(system_id="sys-1", space_id="space-root", name="Home", root=True)
-    no_name = _mk_space(system_id="sys-1", space_id="space-noname", name="", hvac_mode=None, ambient_c=None)
+    no_name = _mk_space(
+        system_id="sys-1",
+        space_id="space-noname",
+        name="",
+        hvac_mode=None,
+        ambient_c=None,
+    )
 
     hds = QuiltHdsSystem(
         system_id="sys-1",
@@ -195,6 +247,86 @@ def test_louver_async_setup_entry_filters_non_real_spaces() -> None:
 
     asyncio.run(select_setup_entry(hass, entry, _add))
     assert len(added) == 1
+
+
+def test_sensor_setup_adds_indoor_unit_and_dial_ambient_temperature_sensors() -> None:
+    from homeassistant.core import HomeAssistant
+
+    hass = HomeAssistant()
+    system = QuiltSystemInfo(system_id="sys-1", name="Home", timezone="UTC")
+    space = _mk_space(system_id="sys-1", space_id="space-1", name="Office")
+    indoor_unit = QuiltIndoorUnit(
+        header=QuiltIndoorUnitHeader(
+            indoor_unit_id="iu-1", created=None, updated=None, system_id="sys-1"
+        ),
+        relationships=QuiltIndoorUnitRelationships(space_id="space-1"),
+        controls=QuiltIndoorUnitControls(
+            updated=None,
+            light_color_code=None,
+            light_brightness=None,
+            light_animation=None,
+            fan_speed_mode=None,
+            fan_speed_percent=None,
+            louver_mode=None,
+            louver_fixed_position=None,
+        ),
+        state=QuiltIndoorUnitState(
+            updated=QuiltTimestamp(seconds=1_000, nanos=0), ambient_c=22.75
+        ),
+    )
+    controller = QuiltController(
+        header=QuiltControllerHeader(
+            controller_id="controller-1", created=None, updated=None, system_id="sys-1"
+        ),
+        relationships=QuiltControllerRelationships(space_id="space-1"),
+        settings=QuiltControllerSettings(name="Dial QD1"),
+        state=QuiltControllerState(
+            updated=QuiltTimestamp(seconds=1_000, nanos=0), ambient_c=24.5
+        ),
+    )
+    hds = QuiltHdsSystem(
+        system_id="sys-1",
+        spaces={"space-1": space},
+        indoor_units={"iu-1": indoor_unit},
+        indoor_units_by_space={"space-1": [indoor_unit]},
+        controllers={"controller-1": controller},
+        controllers_by_space={"space-1": [controller]},
+        comfort_settings={},
+        comfort_settings_by_space={},
+        topic_ids={
+            "space": {"space-1"},
+            "indoor_unit": {"iu-1"},
+            "controller": {"controller-1"},
+        },
+    )
+    coord = _FakeCoordinator(data=type("D", (), {"system": system, "hds": hds})())
+    hass.data = {
+        "quilt": {
+            "entry-1": {
+                "systems": [system],
+                "coordinators": {"sys-1": coord},
+                "energy_coordinators": {},
+            }
+        }
+    }
+    entry = type("E", (), {"entry_id": "entry-1"})()
+    added: list[object] = []
+
+    def _add(entities):  # noqa: ANN001
+        added.extend(entities)
+
+    asyncio.run(sensor_setup_entry(hass, entry, _add))
+
+    assert len(added) == 2
+    assert {type(entity) for entity in added} == {
+        QuiltIndoorUnitAmbientTemperatureSensor,
+        QuiltControllerAmbientTemperatureSensor,
+    }
+    values = {entity.name: entity.native_value for entity in added}
+    assert values == {
+        "Office Indoor Unit Temperature": 22.75,
+        "Office Dial Temperature": 24.5,
+    }
 
 
 def test_energy_coordinator_update_success_and_error() -> None:
@@ -252,7 +384,9 @@ def test_sensor_helpers_and_value_paths(monkeypatch) -> None:  # noqa: ANN001
 
     space = _mk_space(system_id="sys-1", space_id="space-1", name="Office")
     assert _is_real_space(space, "Home")
-    assert not _is_real_space(_mk_space(system_id="sys-1", space_id="space-2", name="Home", root=True), "Home")
+    assert not _is_real_space(
+        _mk_space(system_id="sys-1", space_id="space-2", name="Home", root=True), "Home"
+    )
 
     now = datetime(2026, 1, 25, 9, 0, 0, tzinfo=timezone.utc)
 
@@ -265,23 +399,33 @@ def test_sensor_helpers_and_value_paths(monkeypatch) -> None:  # noqa: ANN001
 
     buckets = [
         QuiltEnergyMetricBucket(
-            start_time=QuiltTimestamp(seconds=int((now - timedelta(hours=1)).timestamp()), nanos=0),
+            start_time=QuiltTimestamp(
+                seconds=int((now - timedelta(hours=1)).timestamp()), nanos=0
+            ),
             status=1,
             energy_usage_kwh=0.4,
         ),
         QuiltEnergyMetricBucket(
-            start_time=QuiltTimestamp(seconds=int((now - timedelta(hours=3)).timestamp()), nanos=0),
+            start_time=QuiltTimestamp(
+                seconds=int((now - timedelta(hours=3)).timestamp()), nanos=0
+            ),
             status=1,
             energy_usage_kwh=0.6,
         ),
         QuiltEnergyMetricBucket(
-            start_time=QuiltTimestamp(seconds=int((now - timedelta(days=1, hours=1)).timestamp()), nanos=0),
+            start_time=QuiltTimestamp(
+                seconds=int((now - timedelta(days=1, hours=1)).timestamp()), nanos=0
+            ),
             status=1,
             energy_usage_kwh=1.1,
         ),
     ]
-    metrics = QuiltSpaceEnergyMetrics(space_id="space-1", bucket_time_resolution=1, energy_buckets=buckets)
-    coord_data = type("CD", (), {"fetched_at": now, "metrics_by_space_id": {"space-1": metrics}})()
+    metrics = QuiltSpaceEnergyMetrics(
+        space_id="space-1", bucket_time_resolution=1, energy_buckets=buckets
+    )
+    coord_data = type(
+        "CD", (), {"fetched_at": now, "metrics_by_space_id": {"space-1": metrics}}
+    )()
     coord = _FakeCoordinator(coord_data)
 
     s7 = QuiltSpaceEnergySensor(

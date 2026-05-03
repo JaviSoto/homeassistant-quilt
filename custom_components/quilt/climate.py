@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import time
 
 from homeassistant.components.climate import ClimateEntity
 from homeassistant.components.climate.const import (
@@ -23,7 +22,11 @@ from homeassistant.util.unit_conversion import TemperatureConverter
 from .api import QuiltApi
 from .const import DOMAIN
 from .coordinator import QuiltCoordinator
-from .hds_encode import encode_space_diff, encode_update_comfort_setting_request, encode_update_indoor_unit_request
+from .hds_encode import (
+    encode_space_diff,
+    encode_update_comfort_setting_request,
+    encode_update_indoor_unit_request,
+)
 from .quilt_parse import QuiltComfortSetting, QuiltSpace, QuiltSystemInfo
 
 _LOGGER = logging.getLogger(__name__)
@@ -94,10 +97,14 @@ def _hvac_action_from_quilt(value: int | None) -> HVACAction | None:
     return None
 
 
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
+async def async_setup_entry(
+    hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
+) -> None:
     api: QuiltApi = hass.data[DOMAIN][entry.entry_id]["api"]
     systems: list[QuiltSystemInfo] = hass.data[DOMAIN][entry.entry_id]["systems"]
-    coordinators: dict[str, QuiltCoordinator] = hass.data[DOMAIN][entry.entry_id]["coordinators"]
+    coordinators: dict[str, QuiltCoordinator] = hass.data[DOMAIN][entry.entry_id][
+        "coordinators"
+    ]
 
     # Cleanup: older versions mistakenly created a climate entity for the synthetic "home/root" space.
     ent_reg = er.async_get(hass)
@@ -106,13 +113,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     for sysinfo in systems:
         coordinator = coordinators[sysinfo.system_id]
         if coordinator.data is None:
-            _LOGGER.warning("Quilt coordinator has no data for %s; skipping entity setup", sysinfo.system_id)
+            _LOGGER.warning(
+                "Quilt coordinator has no data for %s; skipping entity setup",
+                sysinfo.system_id,
+            )
             continue
 
         root_unique_ids: set[str] = set()
         for space in coordinator.data.hds.spaces.values():
-            if space.relationships_parent_space_id is None and space.settings.name == coordinator.data.system.name:
-                root_unique_ids.add(f"quilt:{coordinator.data.system.system_id}:{space.header.space_id}")
+            if (
+                space.relationships_parent_space_id is None
+                and space.settings.name == coordinator.data.system.name
+            ):
+                root_unique_ids.add(
+                    f"quilt:{coordinator.data.system.system_id}:{space.header.space_id}"
+                )
         if root_unique_ids:
             for ent in er.async_entries_for_config_entry(ent_reg, entry.entry_id):
                 if ent.domain != "climate":
@@ -127,7 +142,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
             if space.controls.hvac_mode is None and space.state.ambient_c is None:
                 continue
             # Skip the synthetic root "home" space (it typically matches the system name).
-            if space.relationships_parent_space_id is None and space.settings.name == coordinator.data.system.name:
+            if (
+                space.relationships_parent_space_id is None
+                and space.settings.name == coordinator.data.system.name
+            ):
                 continue
             entities.append(
                 QuiltSpaceClimate(
@@ -149,7 +167,13 @@ class QuiltSpaceClimate(CoordinatorEntity[QuiltCoordinator], ClimateEntity):
         | ClimateEntityFeature.FAN_MODE
         | ClimateEntityFeature.SWING_MODE
     )
-    _attr_hvac_modes = [HVACMode.OFF, HVACMode.HEAT, HVACMode.COOL, HVACMode.HEAT_COOL, HVACMode.FAN_ONLY]
+    _attr_hvac_modes = [
+        HVACMode.OFF,
+        HVACMode.HEAT,
+        HVACMode.COOL,
+        HVACMode.HEAT_COOL,
+        HVACMode.FAN_ONLY,
+    ]
     _attr_fan_modes = ["auto"] + [f"{p}%" for p in _FAN_PERCENT_STEPS]
     # Model "swing" per HA climate semantics: on/off. The richer Quilt louver
     # modes (auto/closed/fixed positions) are exposed via a separate select entity.
@@ -183,7 +207,20 @@ class QuiltSpaceClimate(CoordinatorEntity[QuiltCoordinator], ClimateEntity):
     @property
     def name(self) -> str | None:
         space = self._space
-        return (space.settings.name if space is not None else None) or self._space_name or self._space_id
+        return (
+            (space.settings.name if space is not None else None)
+            or self._space_name
+            or self._space_id
+        )
+
+    @property
+    def available(self) -> bool:
+        data = self.coordinator.data
+        return bool(
+            self.coordinator.last_update_success
+            and data is not None
+            and data.hds.space_is_online(self._space_id)
+        )
 
     @property
     def device_info(self) -> DeviceInfo | None:
@@ -198,7 +235,11 @@ class QuiltSpaceClimate(CoordinatorEntity[QuiltCoordinator], ClimateEntity):
     @property
     def temperature_unit(self) -> str:
         # Quilt uses Celsius internally; HA may be configured for Fahrenheit.
-        return self.hass.config.units.temperature_unit if self.hass else UnitOfTemperature.CELSIUS
+        return (
+            self.hass.config.units.temperature_unit
+            if self.hass
+            else UnitOfTemperature.CELSIUS
+        )
 
     @property
     def min_temp(self) -> float:
@@ -251,7 +292,11 @@ class QuiltSpaceClimate(CoordinatorEntity[QuiltCoordinator], ClimateEntity):
         c = space.controls.heating_setpoint_c
         if c is None or c <= 0:
             cs_active = self._find_comfort_setting_for_space(name="Active")
-            c = cs_active.attributes.heating_setpoint_c if cs_active is not None else None
+            c = (
+                cs_active.attributes.heating_setpoint_c
+                if cs_active is not None
+                else None
+            )
         if c is None or c <= 0:
             return None
         return self._to_ha_temp(float(c))
@@ -265,7 +310,11 @@ class QuiltSpaceClimate(CoordinatorEntity[QuiltCoordinator], ClimateEntity):
         c = space.controls.cooling_setpoint_c
         if c is None or c <= 0:
             cs_active = self._find_comfort_setting_for_space(name="Active")
-            c = cs_active.attributes.cooling_setpoint_c if cs_active is not None else None
+            c = (
+                cs_active.attributes.cooling_setpoint_c
+                if cs_active is not None
+                else None
+            )
         if c is None or c <= 0:
             return None
         return self._to_ha_temp(float(c))
@@ -318,14 +367,16 @@ class QuiltSpaceClimate(CoordinatorEntity[QuiltCoordinator], ClimateEntity):
             heat_c, cool_c = cool_c, heat_c
 
         cs_active = self._find_comfort_setting_for_space(name="Active")
-        cs_off = self._find_comfort_setting_for_space(name="Off")
-
         # HomeKit often calls climate.set_temperature with both hvac_mode and temperature.
         # If a mode is provided, treat it as authoritative (don't rely on our current
         # coordinator state being updated yet).
         if isinstance(requested_mode, HVACMode) and requested_mode != HVACMode.OFF:
             quilt_mode = _quilt_mode_from_hvac_mode(requested_mode)
-            comfort_id = cs_active.header.comfort_setting_id if cs_active is not None else space.controls.comfort_setting_id
+            comfort_id = (
+                cs_active.header.comfort_setting_id
+                if cs_active is not None
+                else space.controls.comfort_setting_id
+            )
         else:
             if (self.hvac_mode or HVACMode.OFF) == HVACMode.OFF:
                 # When off, only update the Active comfort setting so the next turn-on uses it.
@@ -336,17 +387,29 @@ class QuiltSpaceClimate(CoordinatorEntity[QuiltCoordinator], ClimateEntity):
                         heat_c,
                         cool_c,
                     )
-                    req = encode_update_comfort_setting_request(cs_active, heat_c=float(heat_c), cool_c=float(cool_c))
-                    await self._api.async_update_comfort_setting(comfort_setting_message=req)
+                    req = encode_update_comfort_setting_request(
+                        cs_active, heat_c=float(heat_c), cool_c=float(cool_c)
+                    )
+                    await self._api.async_update_comfort_setting(
+                        comfort_setting_message=req
+                    )
                 await self.coordinator.async_request_refresh()
                 return
 
-            quilt_mode = space.controls.hvac_mode or _quilt_mode_from_hvac_mode(self.hvac_mode or HVACMode.OFF)
-            comfort_id = cs_active.header.comfort_setting_id if cs_active is not None else space.controls.comfort_setting_id
+            quilt_mode = space.controls.hvac_mode or _quilt_mode_from_hvac_mode(
+                self.hvac_mode or HVACMode.OFF
+            )
+            comfort_id = (
+                cs_active.header.comfort_setting_id
+                if cs_active is not None
+                else space.controls.comfort_setting_id
+            )
 
         # Update comfort setting too (matches app behavior).
         if cs_active is not None:
-            req = encode_update_comfort_setting_request(cs_active, heat_c=float(heat_c), cool_c=float(cool_c))
+            req = encode_update_comfort_setting_request(
+                cs_active, heat_c=float(heat_c), cool_c=float(cool_c)
+            )
             await self._api.async_update_comfort_setting(comfort_setting_message=req)
 
         # The "primary" setpoint seems redundant when heat/cool are present; use midpoint for stability.
@@ -381,14 +444,40 @@ class QuiltSpaceClimate(CoordinatorEntity[QuiltCoordinator], ClimateEntity):
 
         # Choose comfort setting and setpoint behavior to match the app.
         if hvac_mode == HVACMode.OFF:
-            quilt_mode = 1  # STANDBY
-            comfort_id = cs_off.header.comfort_setting_id if cs_off is not None else space.controls.comfort_setting_id
-            # Keep the current setpoint when turning off; the Quilt app does not
-            # visibly force it down to the minimum.
-            heat_c = cool_c = float(space.controls.setpoint_c or space.state.setpoint_c or 20.0)
+            # Quilt has a dedicated "Off" comfort setting. Reuse its mode and
+            # setpoints so "off" actually disables conditioning instead of
+            # preserving the current active target temperature.
+            if cs_off is not None:
+                quilt_mode = (
+                    cs_off.attributes.hvac_mode
+                    if cs_off.attributes.hvac_mode is not None
+                    else 1
+                )
+                comfort_id = cs_off.header.comfort_setting_id
+                off_heat = cs_off.attributes.heating_setpoint_c
+                off_cool = cs_off.attributes.cooling_setpoint_c
+                if off_heat is None and off_cool is None:
+                    off_heat = off_cool = 8.0
+                elif off_heat is None:
+                    off_heat = float(off_cool)
+                elif off_cool is None:
+                    off_cool = float(off_heat)
+                heat_c = float(off_heat)
+                cool_c = float(off_cool)
+            else:
+                quilt_mode = 1  # STANDBY
+                comfort_id = space.controls.comfort_setting_id
+                off_target = float(
+                    space.controls.setpoint_c or space.state.setpoint_c or 8.0
+                )
+                heat_c = cool_c = off_target
         else:
             quilt_mode = _quilt_mode_from_hvac_mode(hvac_mode)
-            comfort_id = cs_active.header.comfort_setting_id if cs_active is not None else space.controls.comfort_setting_id
+            comfort_id = (
+                cs_active.header.comfort_setting_id
+                if cs_active is not None
+                else space.controls.comfort_setting_id
+            )
             # If we have an Active comfort setting, prefer it: HomeKit often sets
             # the comfort setpoints and then immediately flips hvac_mode, before
             # we get a coordinator refresh with the new controls.* values.
@@ -397,16 +486,27 @@ class QuiltSpaceClimate(CoordinatorEntity[QuiltCoordinator], ClimateEntity):
                 cool_c = float(cs_active.attributes.cooling_setpoint_c or heat_c)
                 if heat_c > cool_c:
                     heat_c, cool_c = cool_c, heat_c
-            elif cs_active is not None and cs_active.attributes.heating_setpoint_c is not None:
+            elif (
+                cs_active is not None
+                and cs_active.attributes.heating_setpoint_c is not None
+            ):
                 heat_c = cool_c = float(cs_active.attributes.heating_setpoint_c)
             else:
                 current_target = self.target_temperature
-                heat_c = cool_c = self._from_ha_temp(float(current_target)) if current_target is not None else 20.0
+                heat_c = cool_c = (
+                    self._from_ha_temp(float(current_target))
+                    if current_target is not None
+                    else 20.0
+                )
 
             # Keep Active comfort setting in sync with the controls (matches app behavior).
             if cs_active is not None:
-                req = encode_update_comfort_setting_request(cs_active, heat_c=float(heat_c), cool_c=float(cool_c))
-                await self._api.async_update_comfort_setting(comfort_setting_message=req)
+                req = encode_update_comfort_setting_request(
+                    cs_active, heat_c=float(heat_c), cool_c=float(cool_c)
+                )
+                await self._api.async_update_comfort_setting(
+                    comfort_setting_message=req
+                )
 
         setpoint_c = float((heat_c + cool_c) / 2.0)
         diff = encode_space_diff(
@@ -418,7 +518,9 @@ class QuiltSpaceClimate(CoordinatorEntity[QuiltCoordinator], ClimateEntity):
             comfort_setting_id=comfort_id,
             comfort_setting_override=2,  # UNTIL_NEXT_SCHEDULE (observed even for off)
         )
-        _LOGGER.debug("Sending UpdateSpace for %s hvac_mode=%s", self._space_id, quilt_mode)
+        _LOGGER.debug(
+            "Sending UpdateSpace for %s hvac_mode=%s", self._space_id, quilt_mode
+        )
         await self._api.async_update_space(space_message=diff)
         await self.coordinator.async_request_refresh()
 
@@ -493,6 +595,7 @@ class QuiltSpaceClimate(CoordinatorEntity[QuiltCoordinator], ClimateEntity):
         iu = ius[0]
 
         louver_mode: int | None = None
+        louver_fixed_position: float | None = None
 
         # Primary semantics: SWING_ON/OFF.
         if swing_mode == SWING_ON:
@@ -517,20 +620,32 @@ class QuiltSpaceClimate(CoordinatorEntity[QuiltCoordinator], ClimateEntity):
                 louver_mode = _LOUVER_MODE_FIXED
                 louver_fixed_position = pct_int / 100.0
             else:
-                _LOGGER.debug("Invalid swing_mode '%s' for %s", swing_mode, self._space_id)
+                _LOGGER.debug(
+                    "Invalid swing_mode '%s' for %s", swing_mode, self._space_id
+                )
                 return
 
-        req = encode_update_indoor_unit_request(iu, louver_mode=louver_mode)
+        req = encode_update_indoor_unit_request(
+            iu,
+            louver_mode=louver_mode,
+            louver_fixed_position=louver_fixed_position,
+        )
         await self._api.async_update_indoor_unit(indoor_unit_message=req)
         await self.coordinator.async_request_refresh()
 
     def _to_ha_temp(self, celsius: float) -> float:
-        return TemperatureConverter.convert(celsius, UnitOfTemperature.CELSIUS, self.temperature_unit)
+        return TemperatureConverter.convert(
+            celsius, UnitOfTemperature.CELSIUS, self.temperature_unit
+        )
 
     def _from_ha_temp(self, temp: float) -> float:
-        return TemperatureConverter.convert(temp, self.temperature_unit, UnitOfTemperature.CELSIUS)
+        return TemperatureConverter.convert(
+            temp, self.temperature_unit, UnitOfTemperature.CELSIUS
+        )
 
-    def _find_comfort_setting_for_space(self, *, name: str) -> QuiltComfortSetting | None:
+    def _find_comfort_setting_for_space(
+        self, *, name: str
+    ) -> QuiltComfortSetting | None:
         data = self.coordinator.data
         if data is None:
             return None

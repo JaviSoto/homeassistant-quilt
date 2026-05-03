@@ -13,7 +13,12 @@ from .api import QuiltApi
 from .const import DOMAIN
 from .coordinator import QuiltCoordinator
 from .hds_encode import encode_update_indoor_unit_request
-from .quilt_parse import QuiltComfortSetting, QuiltIndoorUnit, QuiltSpace, QuiltSystemInfo
+from .quilt_parse import (
+    QuiltComfortSetting,
+    QuiltIndoorUnit,
+    QuiltSpace,
+    QuiltSystemInfo,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -31,10 +36,14 @@ _OPT_SWEEP = "Sweep"
 _OPT_CLOSED = "Closed"
 
 
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
+async def async_setup_entry(
+    hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
+) -> None:
     api: QuiltApi = hass.data[DOMAIN][entry.entry_id]["api"]
     systems: list[QuiltSystemInfo] = hass.data[DOMAIN][entry.entry_id]["systems"]
-    coordinators: dict[str, QuiltCoordinator] = hass.data[DOMAIN][entry.entry_id]["coordinators"]
+    coordinators: dict[str, QuiltCoordinator] = hass.data[DOMAIN][entry.entry_id][
+        "coordinators"
+    ]
 
     entities: list[QuiltLouverModeSelect] = []
     for sysinfo in systems:
@@ -47,7 +56,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
                 continue
             if space.controls.hvac_mode is None and space.state.ambient_c is None:
                 continue
-            if space.relationships_parent_space_id is None and space.settings.name == coordinator.data.system.name:
+            if (
+                space.relationships_parent_space_id is None
+                and space.settings.name == coordinator.data.system.name
+            ):
                 continue
 
             entities.append(
@@ -100,7 +112,9 @@ class QuiltLouverModeSelect(CoordinatorEntity[QuiltCoordinator], SelectEntity):
         ius = data.hds.indoor_units_by_space.get(self._space_id) or []
         return ius[0] if ius else None
 
-    def _find_comfort_setting_for_space(self, *, name: str) -> QuiltComfortSetting | None:
+    def _find_comfort_setting_for_space(
+        self, *, name: str
+    ) -> QuiltComfortSetting | None:
         data = self.coordinator.data
         if data is None:
             return None
@@ -121,6 +135,15 @@ class QuiltLouverModeSelect(CoordinatorEntity[QuiltCoordinator], SelectEntity):
         return f"{self._space_name} Louver"
 
     @property
+    def available(self) -> bool:
+        data = self.coordinator.data
+        return bool(
+            self.coordinator.last_update_success
+            and data is not None
+            and data.hds.space_is_online(self._space_id)
+        )
+
+    @property
     def device_info(self) -> DeviceInfo | None:
         return DeviceInfo(
             identifiers={(DOMAIN, f"{self._system_id}:{self._space_id}")},
@@ -132,7 +155,9 @@ class QuiltLouverModeSelect(CoordinatorEntity[QuiltCoordinator], SelectEntity):
 
     @property
     def options(self) -> list[str]:
-        return [_OPT_AUTO, _OPT_SWEEP, _OPT_CLOSED] + [f"Fixed {p}%" for p in _FIXED_STEPS]
+        return [_OPT_AUTO, _OPT_SWEEP, _OPT_CLOSED] + [
+            f"Fixed {p}%" for p in _FIXED_STEPS
+        ]
 
     @property
     def current_option(self) -> str | None:
@@ -181,13 +206,17 @@ class QuiltLouverModeSelect(CoordinatorEntity[QuiltCoordinator], SelectEntity):
             try:
                 pct_int = int(option.replace("Fixed", "").replace("%", "").strip())
             except ValueError:
-                _LOGGER.debug("Invalid louver select option '%s' for %s", option, self._space_id)
+                _LOGGER.debug(
+                    "Invalid louver select option '%s' for %s", option, self._space_id
+                )
                 return
             pct_int = max(0, min(100, pct_int))
             louver_mode = _LOUVER_MODE_FIXED
             louver_fixed_position = pct_int / 100.0
         else:
-            _LOGGER.debug("Invalid louver select option '%s' for %s", option, self._space_id)
+            _LOGGER.debug(
+                "Invalid louver select option '%s' for %s", option, self._space_id
+            )
             return
 
         req = encode_update_indoor_unit_request(

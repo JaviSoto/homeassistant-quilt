@@ -64,16 +64,22 @@ def pytest_sessionstart(session) -> None:  # noqa: ARG001
                 def async_get_entry(self, entry_id):  # noqa: ANN001
                     return None
 
-                def async_update_entry(self, entry, data=None, options=None):  # noqa: ANN001
+                def async_update_entry(
+                    self, entry, data=None, options=None
+                ):  # noqa: ANN001
                     return None
 
                 async def async_reload(self, entry_id):  # noqa: ANN001
                     return None
 
-                async def async_forward_entry_setups(self, entry, platforms):  # noqa: ANN001
+                async def async_forward_entry_setups(
+                    self, entry, platforms
+                ):  # noqa: ANN001
                     return None
 
-                async def async_unload_platforms(self, entry, platforms):  # noqa: ANN001
+                async def async_unload_platforms(
+                    self, entry, platforms
+                ):  # noqa: ANN001
                     return True
 
             self.config_entries = _ConfigEntries()
@@ -124,8 +130,15 @@ def pytest_sessionstart(session) -> None:  # noqa: ARG001
         def _abort_if_unique_id_configured(self):  # noqa: D401
             """No-op for tests."""
 
-        def async_show_form(self, *, step_id, data_schema=None, errors=None):  # noqa: ANN001
-            return {"type": "form", "step_id": step_id, "errors": errors or {}, "schema": data_schema}
+        def async_show_form(
+            self, *, step_id, data_schema=None, errors=None
+        ):  # noqa: ANN001
+            return {
+                "type": "form",
+                "step_id": step_id,
+                "errors": errors or {},
+                "schema": data_schema,
+            }
 
         def async_create_entry(self, *, title, data):  # noqa: ANN001
             return {"type": "create_entry", "title": title, "data": data}
@@ -139,8 +152,15 @@ def pytest_sessionstart(session) -> None:  # noqa: ARG001
         def __init__(self, config_entry):  # noqa: ANN001
             self._config_entry = config_entry
 
-        def async_show_form(self, *, step_id, data_schema=None, errors=None):  # noqa: ANN001
-            return {"type": "form", "step_id": step_id, "errors": errors or {}, "schema": data_schema}
+        def async_show_form(
+            self, *, step_id, data_schema=None, errors=None
+        ):  # noqa: ANN001
+            return {
+                "type": "form",
+                "step_id": step_id,
+                "errors": errors or {},
+                "schema": data_schema,
+            }
 
         def async_create_entry(self, *, title, data):  # noqa: ANN001
             return {"type": "create_entry", "title": title, "data": data}
@@ -193,7 +213,9 @@ def pytest_sessionstart(session) -> None:  # noqa: ARG001
         def __class_getitem__(cls, item):  # noqa: ANN001
             return cls
 
-        def __init__(self, hass, *, logger=None, name="", update_interval=None):  # noqa: ANN001
+        def __init__(
+            self, hass, *, logger=None, name="", update_interval=None
+        ):  # noqa: ANN001
             self.hass = hass
             self.logger = logger
             self.name = name
@@ -335,6 +357,7 @@ def pytest_sessionstart(session) -> None:  # noqa: ARG001
 
     class SensorDeviceClass(str, enum.Enum):
         ENERGY = "energy"
+        TEMPERATURE = "temperature"
 
     sensor.SensorDeviceClass = SensorDeviceClass
 

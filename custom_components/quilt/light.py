@@ -26,7 +26,9 @@ _LIGHT_ANIMATION_TO_EFFECT: dict[int, str] = {
     5: "Chase",
 }
 
-_EFFECT_TO_LIGHT_ANIMATION: dict[str, int] = {v: k for k, v in _LIGHT_ANIMATION_TO_EFFECT.items()}
+_EFFECT_TO_LIGHT_ANIMATION: dict[str, int] = {
+    v: k for k, v in _LIGHT_ANIMATION_TO_EFFECT.items()
+}
 
 
 def _pct_to_brightness(pct_0_1: float | None) -> int | None:
@@ -63,16 +65,23 @@ def _color_code_from_rgbw(r: int, g: int, b: int, w: int) -> int:
     return (rr << 24) | (gg << 16) | (bb << 8) | ww
 
 
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
+async def async_setup_entry(
+    hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
+) -> None:
     api: QuiltApi = hass.data[DOMAIN][entry.entry_id]["api"]
     systems: list[QuiltSystemInfo] = hass.data[DOMAIN][entry.entry_id]["systems"]
-    coordinators: dict[str, QuiltCoordinator] = hass.data[DOMAIN][entry.entry_id]["coordinators"]
+    coordinators: dict[str, QuiltCoordinator] = hass.data[DOMAIN][entry.entry_id][
+        "coordinators"
+    ]
 
     entities: list[QuiltIndoorUnitLight] = []
     for sysinfo in systems:
         coordinator = coordinators[sysinfo.system_id]
         if coordinator.data is None:
-            _LOGGER.warning("Quilt coordinator has no data for %s; skipping light entity setup", sysinfo.system_id)
+            _LOGGER.warning(
+                "Quilt coordinator has no data for %s; skipping light entity setup",
+                sysinfo.system_id,
+            )
             continue
 
         hds = coordinator.data.hds
@@ -81,7 +90,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
             if space is None or not space.settings.name:
                 continue
             # Skip the synthetic root "home" space (it typically matches the system name).
-            if space.relationships_parent_space_id is None and space.settings.name == coordinator.data.system.name:
+            if (
+                space.relationships_parent_space_id is None
+                and space.settings.name == coordinator.data.system.name
+            ):
                 continue
             for iu in indoor_units:
                 entities.append(
@@ -140,6 +152,15 @@ class QuiltIndoorUnitLight(CoordinatorEntity[QuiltCoordinator], LightEntity):
     @property
     def name(self) -> str | None:
         return f"{self._space_name} Light"
+
+    @property
+    def available(self) -> bool:
+        data = self.coordinator.data
+        return bool(
+            self.coordinator.last_update_success
+            and data is not None
+            and data.hds.indoor_unit_is_online(self._indoor_unit_id)
+        )
 
     @property
     def device_info(self) -> DeviceInfo | None:
@@ -209,7 +230,11 @@ class QuiltIndoorUnitLight(CoordinatorEntity[QuiltCoordinator], LightEntity):
         target_pct = _brightness_to_pct(kwargs.get("brightness"))
         if target_pct is None:
             # If no brightness provided, default to the last known brightness or full.
-            target_pct = float(iu.controls.light_brightness) if iu.controls.light_brightness is not None else 1.0
+            target_pct = (
+                float(iu.controls.light_brightness)
+                if iu.controls.light_brightness is not None
+                else 1.0
+            )
         target_pct = max(0.0, min(1.0, target_pct))
         if target_pct == 0.0:
             target_pct = 1.0

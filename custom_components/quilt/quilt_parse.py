@@ -1,8 +1,16 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+import time
+from dataclasses import dataclass, field
 
-from .proto_wire import ProtoWireError, decode_message, fixed32_to_float, fixed64_to_double, get_all, get_first
+from .proto_wire import (
+    ProtoWireError,
+    decode_message,
+    fixed32_to_float,
+    fixed64_to_double,
+    get_all,
+    get_first,
+)
 
 
 @dataclass(frozen=True)
@@ -97,6 +105,44 @@ class QuiltIndoorUnitControls:
 
 
 @dataclass(frozen=True)
+class QuiltIndoorUnitState:
+    updated: QuiltTimestamp | None
+    ambient_c: float | None = None
+
+
+@dataclass(frozen=True)
+class QuiltControllerHeader:
+    controller_id: str
+    created: QuiltTimestamp | None
+    updated: QuiltTimestamp | None
+    system_id: str
+
+
+@dataclass(frozen=True)
+class QuiltControllerRelationships:
+    space_id: str | None
+
+
+@dataclass(frozen=True)
+class QuiltControllerSettings:
+    name: str | None
+
+
+@dataclass(frozen=True)
+class QuiltControllerState:
+    updated: QuiltTimestamp | None
+    ambient_c: float | None
+
+
+@dataclass(frozen=True)
+class QuiltController:
+    header: QuiltControllerHeader
+    relationships: QuiltControllerRelationships | None
+    settings: QuiltControllerSettings
+    state: QuiltControllerState | None
+
+
+@dataclass(frozen=True)
 class QuiltIndoorUnitRelationships:
     space_id: str | None
 
@@ -106,6 +152,7 @@ class QuiltIndoorUnit:
     header: QuiltIndoorUnitHeader
     relationships: QuiltIndoorUnitRelationships | None
     controls: QuiltIndoorUnitControls
+    state: QuiltIndoorUnitState | None = None
 
 
 @dataclass(frozen=True)
@@ -117,6 +164,8 @@ class QuiltHdsSystem:
     comfort_settings: dict[str, "QuiltComfortSetting"]
     comfort_settings_by_space: dict[str, list["QuiltComfortSetting"]]
     topic_ids: dict[str, set[str]]
+    controllers: dict[str, QuiltController] = field(default_factory=dict)
+    controllers_by_space: dict[str, list[QuiltController]] = field(default_factory=dict)
 
     def notifier_topics(self) -> set[str]:
         topics: set[str] = set()
@@ -124,6 +173,37 @@ class QuiltHdsSystem:
             for oid in ids:
                 topics.add(f"hds/{topic_name}/{oid}")
         return topics
+
+    def indoor_unit_is_online(
+        self, indoor_unit_id: str, *, now_seconds: float | None = None
+    ) -> bool:
+        indoor_unit = self.indoor_units.get(indoor_unit_id)
+        if indoor_unit is None or indoor_unit.state is None:
+            return False
+        return _is_timestamp_online(indoor_unit.state.updated, now_seconds=now_seconds)
+
+    def controller_is_online(
+        self, controller_id: str, *, now_seconds: float | None = None
+    ) -> bool:
+        controller = self.controllers.get(controller_id)
+        if controller is None or controller.state is None:
+            return False
+        return _is_timestamp_online(controller.state.updated, now_seconds=now_seconds)
+
+    def space_is_online(
+        self, space_id: str, *, now_seconds: float | None = None
+    ) -> bool:
+        space = self.spaces.get(space_id)
+        if space is None:
+            return False
+        if _is_timestamp_online(space.state.updated, now_seconds=now_seconds):
+            return True
+        return any(
+            self.indoor_unit_is_online(
+                iu.header.indoor_unit_id, now_seconds=now_seconds
+            )
+            for iu in self.indoor_units_by_space.get(space_id, [])
+        )
 
 
 @dataclass(frozen=True)
@@ -170,7 +250,19 @@ def _parse_timestamp(raw: bytes) -> QuiltTimestamp | None:
     ns = get_first(fields, number=2, wire_type=0)
     if sec is None:
         return None
-    return QuiltTimestamp(seconds=int(sec.value), nanos=int(ns.value) if ns is not None else 0)
+    return QuiltTimestamp(
+        seconds=int(sec.value), nanos=int(ns.value) if ns is not None else 0
+    )
+
+
+def _is_timestamp_online(
+    ts: QuiltTimestamp | None, *, now_seconds: float | None = None
+) -> bool:
+    if ts is None:
+        return False
+    if now_seconds is None:
+        now_seconds = time.time()
+    return (now_seconds - (ts.seconds + (ts.nanos / 1_000_000_000))) < (5 * 60)
 
 
 def _parse_header(raw: bytes) -> QuiltSpaceHeader | None:
@@ -210,6 +302,22 @@ def _parse_indoor_unit_header(raw: bytes) -> QuiltIndoorUnitHeader | None:
     )
 
 
+def _parse_controller_header(raw: bytes) -> QuiltControllerHeader | None:
+    fields = decode_message(raw)
+    oid = get_first(fields, number=1, wire_type=2)
+    created = get_first(fields, number=2, wire_type=2)
+    updated = get_first(fields, number=3, wire_type=2)
+    system_id = get_first(fields, number=4, wire_type=2)
+    if oid is None or system_id is None:
+        return None
+    return QuiltControllerHeader(
+        controller_id=oid.value.decode("utf-8"),
+        created=_parse_timestamp(created.value) if created is not None else None,
+        updated=_parse_timestamp(updated.value) if updated is not None else None,
+        system_id=system_id.value.decode("utf-8"),
+    )
+
+
 def _parse_settings(raw: bytes) -> QuiltSpaceSettings:
     fields = decode_message(raw)
     name = get_first(fields, number=1, wire_type=2)
@@ -233,12 +341,18 @@ def _parse_controls(raw: bytes) -> QuiltSpaceControls:
     return QuiltSpaceControls(
         hvac_mode=int(hvac_mode.value) if hvac_mode is not None else None,
         setpoint_c=fixed32_to_float(setpoint.value) if setpoint is not None else None,
-        cooling_setpoint_c=fixed32_to_float(cooling.value) if cooling is not None else None,
-        heating_setpoint_c=fixed32_to_float(heating.value) if heating is not None else None,
+        cooling_setpoint_c=(
+            fixed32_to_float(cooling.value) if cooling is not None else None
+        ),
+        heating_setpoint_c=(
+            fixed32_to_float(heating.value) if heating is not None else None
+        ),
         updated=_parse_timestamp(updated.value) if updated is not None else None,
         unknown_field7=int(unknown7.value) if unknown7 is not None else None,
         comfort_setting_override=int(override.value) if override is not None else None,
-        comfort_setting_id=comfort_id.value.decode("utf-8") if comfort_id is not None else None,
+        comfort_setting_id=(
+            comfort_id.value.decode("utf-8") if comfort_id is not None else None
+        ),
     )
 
 
@@ -254,7 +368,9 @@ def _parse_state(raw: bytes) -> QuiltSpaceState:
         setpoint_c=fixed32_to_float(setpoint.value) if setpoint is not None else None,
         ambient_c=fixed32_to_float(ambient.value) if ambient is not None else None,
         hvac_state=int(hvac_state.value) if hvac_state is not None else None,
-        comfort_setting_id=comfort_id.value.decode("utf-8") if comfort_id is not None else None,
+        comfort_setting_id=(
+            comfort_id.value.decode("utf-8") if comfort_id is not None else None
+        ),
     )
 
 
@@ -272,7 +388,25 @@ def _parse_indoor_unit_relationships(raw: bytes) -> QuiltIndoorUnitRelationships
     # }
     fields = decode_message(raw)
     space_id = get_first(fields, number=2, wire_type=2)
-    return QuiltIndoorUnitRelationships(space_id=space_id.value.decode("utf-8") if space_id is not None else None)
+    return QuiltIndoorUnitRelationships(
+        space_id=space_id.value.decode("utf-8") if space_id is not None else None
+    )
+
+
+def _parse_controller_relationships(raw: bytes) -> QuiltControllerRelationships | None:
+    fields = decode_message(raw)
+    space_id = get_first(fields, number=2, wire_type=2)
+    return QuiltControllerRelationships(
+        space_id=space_id.value.decode("utf-8") if space_id is not None else None
+    )
+
+
+def _parse_controller_settings(raw: bytes) -> QuiltControllerSettings:
+    fields = decode_message(raw)
+    name = get_first(fields, number=1, wire_type=2)
+    return QuiltControllerSettings(
+        name=name.value.decode("utf-8") if name is not None else None
+    )
 
 
 def _parse_indoor_unit_controls(raw: bytes) -> QuiltIndoorUnitControls:
@@ -299,12 +433,49 @@ def _parse_indoor_unit_controls(raw: bytes) -> QuiltIndoorUnitControls:
     return QuiltIndoorUnitControls(
         updated=_parse_timestamp(updated.value) if updated is not None else None,
         light_color_code=int(color.value) if color is not None else None,
-        light_brightness=fixed32_to_float(brightness.value) if brightness is not None else None,
+        light_brightness=(
+            fixed32_to_float(brightness.value) if brightness is not None else None
+        ),
         light_animation=int(anim.value) if anim is not None else None,
         fan_speed_mode=int(fan_mode.value) if fan_mode is not None else None,
-        fan_speed_percent=fixed32_to_float(fan_percent.value) if fan_percent is not None else None,
+        fan_speed_percent=(
+            fixed32_to_float(fan_percent.value) if fan_percent is not None else None
+        ),
         louver_mode=int(louver_mode.value) if louver_mode is not None else None,
-        louver_fixed_position=fixed32_to_float(louver_pos.value) if louver_pos is not None else None,
+        louver_fixed_position=(
+            fixed32_to_float(louver_pos.value) if louver_pos is not None else None
+        ),
+    )
+
+
+def _parse_indoor_unit_state(raw: bytes) -> QuiltIndoorUnitState:
+    fields = decode_message(raw)
+    updated = get_first(fields, number=1, wire_type=2)
+    # The Quilt app can show the indoor-unit reading separately from the Dial.
+    # Captured HDS payloads put the room-facing indoor-unit ambient value in field 9.
+    ambient = get_first(fields, number=9, wire_type=5) or get_first(
+        fields, number=3, wire_type=5
+    )
+    return QuiltIndoorUnitState(
+        updated=_parse_timestamp(updated.value) if updated is not None else None,
+        ambient_c=fixed32_to_float(ambient.value) if ambient is not None else None,
+    )
+
+
+def _parse_controller_state(raw: bytes) -> QuiltControllerState:
+    fields = decode_message(raw)
+    # Controller state payloads include multiple raw sensor values. Field 5
+    # matches the Dial ambient temperature shown by the iOS app; field 15 is
+    # the corresponding state timestamp in captured payloads.
+    updated = get_first(fields, number=15, wire_type=2) or get_first(
+        fields, number=1, wire_type=2
+    )
+    ambient = get_first(fields, number=5, wire_type=5) or get_first(
+        fields, number=2, wire_type=5
+    )
+    return QuiltControllerState(
+        updated=_parse_timestamp(updated.value) if updated is not None else None,
+        ambient_c=fixed32_to_float(ambient.value) if ambient is not None else None,
     )
 
 
@@ -340,17 +511,23 @@ def _parse_comfort_setting_attributes(raw: bytes) -> QuiltComfortSettingAttribut
         updated=_parse_timestamp(updated.value) if updated is not None else None,
         name=name.value.decode("utf-8") if name is not None else None,
         fan_speed_mode=int(fan_mode.value) if fan_mode is not None else None,
-        fan_speed_percent=fixed32_to_float(fan_percent.value) if fan_percent is not None else None,
+        fan_speed_percent=(
+            fixed32_to_float(fan_percent.value) if fan_percent is not None else None
+        ),
         heating_setpoint_c=fixed32_to_float(heat.value) if heat is not None else None,
         cooling_setpoint_c=fixed32_to_float(cool.value) if cool is not None else None,
         comfort_setting_type=int(cs_type.value) if cs_type is not None else None,
         hvac_mode=int(hvac_mode.value) if hvac_mode is not None else None,
         louver_mode=int(louver_mode.value) if louver_mode is not None else None,
-        louver_fixed_position=fixed32_to_float(louver_fixed.value) if louver_fixed is not None else None,
+        louver_fixed_position=(
+            fixed32_to_float(louver_fixed.value) if louver_fixed is not None else None
+        ),
     )
 
 
-def _parse_comfort_setting_relationships(raw: bytes) -> QuiltComfortSettingRelationships | None:
+def _parse_comfort_setting_relationships(
+    raw: bytes,
+) -> QuiltComfortSettingRelationships | None:
     try:
         fields = decode_message(raw)
     except ProtoWireError:
@@ -378,7 +555,11 @@ def parse_list_systems_response(data: bytes) -> list[QuiltSystemInfo]:
         out.append(
             QuiltSystemInfo(
                 system_id=sid.value.decode("utf-8"),
-                name=name.value.decode("utf-8") if name is not None else sid.value.decode("utf-8"),
+                name=(
+                    name.value.decode("utf-8")
+                    if name is not None
+                    else sid.value.decode("utf-8")
+                ),
                 timezone=tz.value.decode("utf-8") if tz is not None else "",
             )
         )
@@ -398,6 +579,8 @@ def parse_get_home_datastore_system_response(data: bytes) -> QuiltHdsSystem:
     spaces: dict[str, QuiltSpace] = {}
     indoor_units: dict[str, QuiltIndoorUnit] = {}
     indoor_units_by_space: dict[str, list[QuiltIndoorUnit]] = {}
+    controllers: dict[str, QuiltController] = {}
+    controllers_by_space: dict[str, list[QuiltController]] = {}
     comfort_settings: dict[str, QuiltComfortSetting] = {}
     comfort_settings_by_space: dict[str, list[QuiltComfortSetting]] = {}
     system_id_box: list[str | None] = [None]
@@ -416,9 +599,9 @@ def parse_get_home_datastore_system_response(data: bytes) -> QuiltHdsSystem:
         # Keeping this mapping correct is important for notifier subscriptions.
         8: "indoor_unit_hardware",
         9: "indoor_unit",
-        10: "controller",
-        11: "controller_remote_sensor",
-        12: "controller_hardware",
+        10: "controller_hardware",
+        11: "controller",
+        12: "controller_remote_sensor",
         13: "comfort_setting",
         14: "schedule_day",
         15: "schedule_week",
@@ -458,12 +641,17 @@ def parse_get_home_datastore_system_response(data: bytes) -> QuiltHdsSystem:
         header_f = get_first(iu_fields, number=1, wire_type=2)
         rel_f = get_first(iu_fields, number=2, wire_type=2)
         controls_f = get_first(iu_fields, number=4, wire_type=2)
+        state_f = get_first(iu_fields, number=5, wire_type=2)
 
-        header = _parse_indoor_unit_header(header_f.value) if header_f is not None else None
+        header = (
+            _parse_indoor_unit_header(header_f.value) if header_f is not None else None
+        )
         if header is None:
             continue
         system_id_box[0] = system_id_box[0] or header.system_id
-        rel = _parse_indoor_unit_relationships(rel_f.value) if rel_f is not None else None
+        rel = (
+            _parse_indoor_unit_relationships(rel_f.value) if rel_f is not None else None
+        )
         controls = (
             _parse_indoor_unit_controls(controls_f.value)
             if controls_f is not None
@@ -479,11 +667,48 @@ def parse_get_home_datastore_system_response(data: bytes) -> QuiltHdsSystem:
             )
         )
 
-        iu = QuiltIndoorUnit(header=header, relationships=rel, controls=controls)
+        state = _parse_indoor_unit_state(state_f.value) if state_f is not None else None
+        iu = QuiltIndoorUnit(
+            header=header, relationships=rel, controls=controls, state=state
+        )
         indoor_units[header.indoor_unit_id] = iu
         if rel is not None and rel.space_id is not None:
             indoor_units_by_space.setdefault(rel.space_id, []).append(iu)
         topic_ids.setdefault("indoor_unit", set()).add(header.indoor_unit_id)
+
+    for f in get_all(top, number=11, wire_type=2):
+        try:
+            controller_fields = decode_message(f.value)
+        except ProtoWireError:
+            continue
+        header_f = get_first(controller_fields, number=1, wire_type=2)
+        rel_f = get_first(controller_fields, number=2, wire_type=2)
+        settings_f = get_first(controller_fields, number=3, wire_type=2)
+        state_f = get_first(controller_fields, number=4, wire_type=2)
+
+        header = (
+            _parse_controller_header(header_f.value) if header_f is not None else None
+        )
+        if header is None:
+            continue
+        system_id_box[0] = system_id_box[0] or header.system_id
+        rel = (
+            _parse_controller_relationships(rel_f.value) if rel_f is not None else None
+        )
+        settings = (
+            _parse_controller_settings(settings_f.value)
+            if settings_f is not None
+            else QuiltControllerSettings(None)
+        )
+        state = _parse_controller_state(state_f.value) if state_f is not None else None
+        controller = QuiltController(
+            header=header, relationships=rel, settings=settings, state=state
+        )
+        controllers[header.controller_id] = controller
+        if rel is not None and rel.space_id is not None:
+            controllers_by_space.setdefault(rel.space_id, []).append(controller)
+        topic_ids.setdefault("controller", set()).add(header.controller_id)
+
     for f in get_all(top, number=3, wire_type=2):
         space_fields = decode_message(f.value)
         header_f = get_first(space_fields, number=1, wire_type=2)
@@ -496,14 +721,24 @@ def parse_get_home_datastore_system_response(data: bytes) -> QuiltHdsSystem:
         if header is None:
             continue
         system_id_box[0] = system_id_box[0] or header.system_id
-        settings = _parse_settings(settings_f.value) if settings_f is not None else QuiltSpaceSettings(None, None)
+        settings = (
+            _parse_settings(settings_f.value)
+            if settings_f is not None
+            else QuiltSpaceSettings(None, None)
+        )
         controls = (
             _parse_controls(controls_f.value)
             if controls_f is not None
             else QuiltSpaceControls(None, None, None, None, None, None, None, None)
         )
-        state = _parse_state(state_f.value) if state_f is not None else QuiltSpaceState(None, None, None, None, None)
-        parent_space_id = _parse_relationships(rel_f.value) if rel_f is not None else None
+        state = (
+            _parse_state(state_f.value)
+            if state_f is not None
+            else QuiltSpaceState(None, None, None, None, None)
+        )
+        parent_space_id = (
+            _parse_relationships(rel_f.value) if rel_f is not None else None
+        )
 
         spaces[header.space_id] = QuiltSpace(
             header=header,
@@ -520,12 +755,20 @@ def parse_get_home_datastore_system_response(data: bytes) -> QuiltHdsSystem:
         attrs_f = get_first(cs_fields, number=2, wire_type=2)
         rel_f = get_first(cs_fields, number=3, wire_type=2)
 
-        header = _parse_comfort_setting_header(header_f.value) if header_f is not None else None
+        header = (
+            _parse_comfort_setting_header(header_f.value)
+            if header_f is not None
+            else None
+        )
         if header is None or attrs_f is None:
             continue
         system_id_box[0] = system_id_box[0] or header.system_id
         attrs = _parse_comfort_setting_attributes(attrs_f.value)
-        rel = _parse_comfort_setting_relationships(rel_f.value) if rel_f is not None else None
+        rel = (
+            _parse_comfort_setting_relationships(rel_f.value)
+            if rel_f is not None
+            else None
+        )
         cs = QuiltComfortSetting(header=header, attributes=attrs, relationships=rel)
         comfort_settings[header.comfort_setting_id] = cs
         if rel is not None and rel.space_id is not None:
@@ -540,6 +783,8 @@ def parse_get_home_datastore_system_response(data: bytes) -> QuiltHdsSystem:
         comfort_settings=comfort_settings,
         comfort_settings_by_space=comfort_settings_by_space,
         topic_ids=topic_ids,
+        controllers=controllers,
+        controllers_by_space=controllers_by_space,
     )
 
 
@@ -570,7 +815,9 @@ def parse_get_energy_metrics_response(data: bytes) -> list[QuiltSpaceEnergyMetri
             b_fields = decode_message(b.value)
             ts_f = get_first(b_fields, number=1, wire_type=2)
             status_f = get_first(b_fields, number=2, wire_type=0)
-            energy_f = get_first(b_fields, number=3, wire_type=1) or get_first(b_fields, number=3, wire_type=5)
+            energy_f = get_first(b_fields, number=3, wire_type=1) or get_first(
+                b_fields, number=3, wire_type=5
+            )
 
             ts = _parse_timestamp(ts_f.value) if ts_f is not None else None
             if ts is None or energy_f is None:
