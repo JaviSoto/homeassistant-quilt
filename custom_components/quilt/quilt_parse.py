@@ -187,6 +187,15 @@ class QuiltRemoteSensor:
 
 
 @dataclass(frozen=True)
+class QuiltControllerRemoteSensor:
+    header: QuiltRemoteSensorHeader
+    attributes: QuiltRemoteSensorAttributes | None
+    state: QuiltRemoteSensorState | None
+    relationships: QuiltRemoteSensorRelationships | None
+    controls: QuiltRemoteSensorControls | None
+
+
+@dataclass(frozen=True)
 class QuiltIndoorUnitRelationships:
     space_id: str | None
 
@@ -214,6 +223,12 @@ class QuiltHdsSystem:
     remote_sensors_by_indoor_unit: dict[str, list[QuiltRemoteSensor]] = field(
         default_factory=dict
     )
+    controller_remote_sensors: dict[str, QuiltControllerRemoteSensor] = field(
+        default_factory=dict
+    )
+    controller_remote_sensors_by_indoor_unit: dict[
+        str, list[QuiltControllerRemoteSensor]
+    ] = field(default_factory=dict)
 
     def notifier_topics(self) -> set[str]:
         topics: set[str] = set()
@@ -242,6 +257,16 @@ class QuiltHdsSystem:
         self, remote_sensor_id: str, *, now_seconds: float | None = None
     ) -> bool:
         remote_sensor = self.remote_sensors.get(remote_sensor_id)
+        if remote_sensor is None or remote_sensor.state is None:
+            return False
+        return _is_timestamp_online(
+            remote_sensor.state.updated, now_seconds=now_seconds
+        )
+
+    def controller_remote_sensor_is_online(
+        self, remote_sensor_id: str, *, now_seconds: float | None = None
+    ) -> bool:
+        remote_sensor = self.controller_remote_sensors.get(remote_sensor_id)
         if remote_sensor is None or remote_sensor.state is None:
             return False
         return _is_timestamp_online(
@@ -558,13 +583,22 @@ def _parse_remote_sensor_attributes(raw: bytes) -> QuiltRemoteSensorAttributes:
     mac = get_first(fields, number=1, wire_type=2)
     updated = get_first(fields, number=2, wire_type=2)
     return QuiltRemoteSensorAttributes(
-        mac=mac.value.decode("utf-8") if mac is not None else None,
+        mac=_parse_mac_address(mac.value) if mac is not None else None,
         updated=_parse_timestamp(updated.value) if updated is not None else None,
     )
 
 
+def _parse_mac_address(raw: bytes) -> str:
+    try:
+        return raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return ":".join(f"{byte:02X}" for byte in raw)
+
+
 def _parse_signed_int32(value: int) -> int:
     value = int(value)
+    if value >= 2**63:
+        return value - 2**64
     if value >= 2**31:
         return value - 2**32
     return value
@@ -577,6 +611,26 @@ def _parse_remote_sensor_state(raw: bytes) -> QuiltRemoteSensorState:
     battery = get_first(fields, number=3, wire_type=5)
     rssi = get_first(fields, number=4, wire_type=0)
     updated = get_first(fields, number=5, wire_type=2)
+    return QuiltRemoteSensorState(
+        updated=_parse_timestamp(updated.value) if updated is not None else None,
+        ambient_c=fixed32_to_float(ambient.value) if ambient is not None else None,
+        humidity_percent=(
+            fixed32_to_float(humidity.value) if humidity is not None else None
+        ),
+        battery_percent=(
+            fixed32_to_float(battery.value) if battery is not None else None
+        ),
+        rssi=_parse_signed_int32(rssi.value) if rssi is not None else None,
+    )
+
+
+def _parse_controller_remote_sensor_state(raw: bytes) -> QuiltRemoteSensorState:
+    fields = decode_message(raw)
+    ambient = get_first(fields, number=1, wire_type=5)
+    humidity = get_first(fields, number=2, wire_type=5)
+    updated = get_first(fields, number=3, wire_type=2)
+    battery = get_first(fields, number=4, wire_type=5)
+    rssi = get_first(fields, number=5, wire_type=0)
     return QuiltRemoteSensorState(
         updated=_parse_timestamp(updated.value) if updated is not None else None,
         ambient_c=fixed32_to_float(ambient.value) if ambient is not None else None,
@@ -611,6 +665,16 @@ def _parse_remote_sensor_controls(raw: bytes) -> QuiltRemoteSensorControls:
     fields = decode_message(raw)
     control_mode = get_first(fields, number=1, wire_type=0)
     updated = get_first(fields, number=2, wire_type=2)
+    return QuiltRemoteSensorControls(
+        control_mode=int(control_mode.value) if control_mode is not None else None,
+        updated=_parse_timestamp(updated.value) if updated is not None else None,
+    )
+
+
+def _parse_controller_remote_sensor_controls(raw: bytes) -> QuiltRemoteSensorControls:
+    fields = decode_message(raw)
+    updated = get_first(fields, number=1, wire_type=2)
+    control_mode = get_first(fields, number=2, wire_type=0)
     return QuiltRemoteSensorControls(
         control_mode=int(control_mode.value) if control_mode is not None else None,
         updated=_parse_timestamp(updated.value) if updated is not None else None,
@@ -721,6 +785,10 @@ def parse_get_home_datastore_system_response(data: bytes) -> QuiltHdsSystem:
     controllers_by_space: dict[str, list[QuiltController]] = {}
     remote_sensors: dict[str, QuiltRemoteSensor] = {}
     remote_sensors_by_indoor_unit: dict[str, list[QuiltRemoteSensor]] = {}
+    controller_remote_sensors: dict[str, QuiltControllerRemoteSensor] = {}
+    controller_remote_sensors_by_indoor_unit: dict[
+        str, list[QuiltControllerRemoteSensor]
+    ] = {}
     comfort_settings: dict[str, QuiltComfortSetting] = {}
     comfort_settings_by_space: dict[str, list[QuiltComfortSetting]] = {}
     system_id_box: list[str | None] = [None]
@@ -900,6 +968,61 @@ def parse_get_home_datastore_system_response(data: bytes) -> QuiltHdsSystem:
             )
         topic_ids.setdefault("remote_sensor", set()).add(header.remote_sensor_id)
 
+    for f in get_all(top, number=12, wire_type=2):
+        try:
+            sensor_fields = decode_message(f.value)
+        except ProtoWireError:
+            continue
+        header_f = get_first(sensor_fields, number=1, wire_type=2)
+        attrs_f = get_first(sensor_fields, number=2, wire_type=2)
+        state_f = get_first(sensor_fields, number=3, wire_type=2)
+        rel_f = get_first(sensor_fields, number=4, wire_type=2)
+        controls_f = get_first(sensor_fields, number=5, wire_type=2)
+
+        header = (
+            _parse_remote_sensor_header(header_f.value)
+            if header_f is not None
+            else None
+        )
+        if header is None:
+            continue
+        system_id_box[0] = system_id_box[0] or header.system_id
+        attributes = (
+            _parse_remote_sensor_attributes(attrs_f.value)
+            if attrs_f is not None
+            else None
+        )
+        state = (
+            _parse_controller_remote_sensor_state(state_f.value)
+            if state_f is not None
+            else None
+        )
+        rel = (
+            _parse_remote_sensor_relationships(rel_f.value)
+            if rel_f is not None
+            else None
+        )
+        controls = (
+            _parse_controller_remote_sensor_controls(controls_f.value)
+            if controls_f is not None
+            else None
+        )
+        sensor = QuiltControllerRemoteSensor(
+            header=header,
+            attributes=attributes,
+            state=state,
+            relationships=rel,
+            controls=controls,
+        )
+        controller_remote_sensors[header.remote_sensor_id] = sensor
+        if rel is not None and rel.indoor_unit_id is not None:
+            controller_remote_sensors_by_indoor_unit.setdefault(
+                rel.indoor_unit_id, []
+            ).append(sensor)
+        topic_ids.setdefault("controller_remote_sensor", set()).add(
+            header.remote_sensor_id
+        )
+
     for f in get_all(top, number=3, wire_type=2):
         space_fields = decode_message(f.value)
         header_f = get_first(space_fields, number=1, wire_type=2)
@@ -978,6 +1101,10 @@ def parse_get_home_datastore_system_response(data: bytes) -> QuiltHdsSystem:
         controllers_by_space=controllers_by_space,
         remote_sensors=remote_sensors,
         remote_sensors_by_indoor_unit=remote_sensors_by_indoor_unit,
+        controller_remote_sensors=controller_remote_sensors,
+        controller_remote_sensors_by_indoor_unit=(
+            controller_remote_sensors_by_indoor_unit
+        ),
     )
 
 
