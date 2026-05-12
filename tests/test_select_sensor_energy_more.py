@@ -31,6 +31,12 @@ from custom_components.quilt.quilt_parse import (
     QuiltSpaceState,
     QuiltSystemInfo,
     QuiltTimestamp,
+    QuiltRemoteSensor,
+    QuiltRemoteSensorAttributes,
+    QuiltRemoteSensorControls,
+    QuiltRemoteSensorHeader,
+    QuiltRemoteSensorRelationships,
+    QuiltRemoteSensorState,
 )
 from custom_components.quilt.select import (
     QuiltLouverModeSelect,
@@ -39,6 +45,9 @@ from custom_components.quilt.select import (
 from custom_components.quilt.sensor import (
     QuiltControllerAmbientTemperatureSensor,
     QuiltIndoorUnitAmbientTemperatureSensor,
+    QuiltRemoteSensorBatterySensor,
+    QuiltRemoteSensorHumiditySensor,
+    QuiltRemoteSensorTemperatureSensor,
     QuiltSpaceEnergySensor,
     _is_real_space,
     _safe_zoneinfo,
@@ -326,6 +335,106 @@ def test_sensor_setup_adds_indoor_unit_and_dial_ambient_temperature_sensors() ->
     assert values == {
         "Office Indoor Unit Temperature": 22.75,
         "Office Dial Temperature": 24.5,
+    }
+
+
+def test_sensor_setup_adds_paired_remote_sensor_entities() -> None:
+    from homeassistant.core import HomeAssistant
+
+    hass = HomeAssistant()
+    system = QuiltSystemInfo(system_id="sys-1", name="Home", timezone="UTC")
+    space = _mk_space(system_id="sys-1", space_id="space-1", name="Office")
+    indoor_unit = QuiltIndoorUnit(
+        header=QuiltIndoorUnitHeader(
+            indoor_unit_id="iu-1", created=None, updated=None, system_id="sys-1"
+        ),
+        relationships=QuiltIndoorUnitRelationships(space_id="space-1"),
+        controls=QuiltIndoorUnitControls(
+            updated=None,
+            light_color_code=None,
+            light_brightness=None,
+            light_animation=None,
+            fan_speed_mode=None,
+            fan_speed_percent=None,
+            louver_mode=None,
+            louver_fixed_position=None,
+        ),
+        state=QuiltIndoorUnitState(
+            updated=QuiltTimestamp(seconds=1_000, nanos=0), ambient_c=None
+        ),
+    )
+    remote_sensor = QuiltRemoteSensor(
+        header=QuiltRemoteSensorHeader(
+            remote_sensor_id="remote-1",
+            created=None,
+            updated=None,
+            system_id="sys-1",
+        ),
+        attributes=QuiltRemoteSensorAttributes(
+            mac="AA:BB:CC:DD:EE:FF",
+            updated=QuiltTimestamp(seconds=1_000, nanos=0),
+        ),
+        state=QuiltRemoteSensorState(
+            updated=QuiltTimestamp(seconds=1_000, nanos=0),
+            ambient_c=23.25,
+            humidity_percent=46.5,
+            battery_percent=87.0,
+            rssi=-43,
+        ),
+        relationships=QuiltRemoteSensorRelationships(
+            indoor_unit_id="iu-1",
+            updated=QuiltTimestamp(seconds=1_000, nanos=0),
+        ),
+        controls=QuiltRemoteSensorControls(
+            control_mode=2,
+            updated=QuiltTimestamp(seconds=1_000, nanos=0),
+        ),
+    )
+    hds = QuiltHdsSystem(
+        system_id="sys-1",
+        spaces={"space-1": space},
+        indoor_units={"iu-1": indoor_unit},
+        indoor_units_by_space={"space-1": [indoor_unit]},
+        controllers={},
+        controllers_by_space={},
+        remote_sensors={"remote-1": remote_sensor},
+        remote_sensors_by_indoor_unit={"iu-1": [remote_sensor]},
+        comfort_settings={},
+        comfort_settings_by_space={},
+        topic_ids={
+            "space": {"space-1"},
+            "indoor_unit": {"iu-1"},
+            "remote_sensor": {"remote-1"},
+        },
+    )
+    coord = _FakeCoordinator(data=type("D", (), {"system": system, "hds": hds})())
+    hass.data = {
+        "quilt": {
+            "entry-1": {
+                "systems": [system],
+                "coordinators": {"sys-1": coord},
+                "energy_coordinators": {},
+            }
+        }
+    }
+    entry = type("E", (), {"entry_id": "entry-1"})()
+    added: list[object] = []
+
+    def _add(entities):  # noqa: ANN001
+        added.extend(entities)
+
+    asyncio.run(sensor_setup_entry(hass, entry, _add))
+
+    assert {type(entity) for entity in added} == {
+        QuiltRemoteSensorTemperatureSensor,
+        QuiltRemoteSensorHumiditySensor,
+        QuiltRemoteSensorBatterySensor,
+    }
+    values = {entity.name: entity.native_value for entity in added}
+    assert values == {
+        "Office Remote Sensor Temperature": 23.25,
+        "Office Remote Sensor Humidity": 46.5,
+        "Office Remote Sensor Battery": 87.0,
     }
 
 

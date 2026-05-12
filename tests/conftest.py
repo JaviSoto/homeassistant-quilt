@@ -89,6 +89,7 @@ def pytest_sessionstart(session) -> None:  # noqa: ARG001
     const = _ensure_pkg("homeassistant.const")
     const.UnitOfTemperature = types.SimpleNamespace(CELSIUS="°C", FAHRENHEIT="°F")
     const.UnitOfEnergy = types.SimpleNamespace(KILO_WATT_HOUR="kWh")
+    const.PERCENTAGE = "%"
     const.EVENT_HOMEASSISTANT_STARTED = "homeassistant_started"
 
     exceptions = _ensure_pkg("homeassistant.exceptions")
@@ -356,7 +357,9 @@ def pytest_sessionstart(session) -> None:  # noqa: ARG001
     sensor = _ensure_pkg("homeassistant.components.sensor")
 
     class SensorDeviceClass(str, enum.Enum):
+        BATTERY = "battery"
         ENERGY = "energy"
+        HUMIDITY = "humidity"
         TEMPERATURE = "temperature"
 
     sensor.SensorDeviceClass = SensorDeviceClass

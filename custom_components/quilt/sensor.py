@@ -10,7 +10,7 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import UnitOfEnergy, UnitOfTemperature
+from homeassistant.const import PERCENTAGE, UnitOfEnergy, UnitOfTemperature
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -23,6 +23,7 @@ from .quilt_parse import (
     QuiltController,
     QuiltEnergyMetricBucket,
     QuiltIndoorUnit,
+    QuiltRemoteSensor,
     QuiltSpace,
     QuiltSpaceEnergyMetrics,
     QuiltSystemInfo,
@@ -110,6 +111,43 @@ async def async_setup_entry(
                             controller_id=controller.header.controller_id,
                         )
                     )
+            for indoor_unit in coordinator.data.hds.indoor_units_by_space.get(
+                space.header.space_id, []
+            ):
+                remote_sensors = coordinator.data.hds.remote_sensors_by_indoor_unit.get(
+                    indoor_unit.header.indoor_unit_id,
+                    [],
+                )
+                for remote_sensor in remote_sensors:
+                    if remote_sensor.state is None:
+                        continue
+                    if remote_sensor.state.ambient_c is not None:
+                        entities.append(
+                            QuiltRemoteSensorTemperatureSensor(
+                                coordinator=coordinator,
+                                system_id=sysinfo.system_id,
+                                space_name=space.settings.name or space.header.space_id,
+                                remote_sensor_id=remote_sensor.header.remote_sensor_id,
+                            )
+                        )
+                    if remote_sensor.state.humidity_percent is not None:
+                        entities.append(
+                            QuiltRemoteSensorHumiditySensor(
+                                coordinator=coordinator,
+                                system_id=sysinfo.system_id,
+                                space_name=space.settings.name or space.header.space_id,
+                                remote_sensor_id=remote_sensor.header.remote_sensor_id,
+                            )
+                        )
+                    if remote_sensor.state.battery_percent is not None:
+                        entities.append(
+                            QuiltRemoteSensorBatterySensor(
+                                coordinator=coordinator,
+                                system_id=sysinfo.system_id,
+                                space_name=space.settings.name or space.header.space_id,
+                                remote_sensor_id=remote_sensor.header.remote_sensor_id,
+                            )
+                        )
             if energy is None:
                 continue
             entities.append(
@@ -288,6 +326,120 @@ class QuiltControllerAmbientTemperatureSensor(
         if controller is None or controller.state is None:
             return None
         return controller.state.ambient_c
+
+
+class _QuiltRemoteSensorBase(CoordinatorEntity[QuiltCoordinator], SensorEntity):
+    """Base entity for values reported by a paired external Bluetooth sensor."""
+
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    def __init__(
+        self,
+        *,
+        coordinator: QuiltCoordinator,
+        system_id: str,
+        space_name: str,
+        remote_sensor_id: str,
+    ) -> None:
+        super().__init__(coordinator)
+        self._system_id = system_id
+        self._space_name = space_name
+        self._remote_sensor_id = remote_sensor_id
+
+    @property
+    def _remote_sensor(self) -> QuiltRemoteSensor | None:
+        if self.coordinator.data is None:
+            return None
+        return self.coordinator.data.hds.remote_sensors.get(self._remote_sensor_id)
+
+    @property
+    def available(self) -> bool:
+        data = self.coordinator.data
+        return bool(
+            self.coordinator.last_update_success
+            and data is not None
+            and data.hds.remote_sensor_is_online(self._remote_sensor_id)
+        )
+
+    @property
+    def device_info(self) -> DeviceInfo | None:
+        return DeviceInfo(
+            identifiers={
+                (DOMAIN, f"{self._system_id}:remote_sensor:{self._remote_sensor_id}")
+            },
+            name=f"{self._space_name} Remote Sensor",
+            manufacturer="Quilt",
+            model="Bluetooth Remote Sensor",
+            suggested_area=self._space_name or None,
+        )
+
+
+class QuiltRemoteSensorTemperatureSensor(_QuiltRemoteSensorBase):
+    """Ambient temperature reported by a paired external Bluetooth sensor."""
+
+    _attr_device_class = SensorDeviceClass.TEMPERATURE
+    _attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
+
+    @property
+    def unique_id(self) -> str:
+        return f"quilt:{self._system_id}:remote_sensor:{self._remote_sensor_id}:ambient_temperature"
+
+    @property
+    def name(self) -> str | None:
+        return f"{self._space_name} Remote Sensor Temperature"
+
+    @property
+    def native_value(self) -> float | None:
+        remote_sensor = self._remote_sensor
+        if remote_sensor is None or remote_sensor.state is None:
+            return None
+        return remote_sensor.state.ambient_c
+
+
+class QuiltRemoteSensorHumiditySensor(_QuiltRemoteSensorBase):
+    """Humidity reported by a paired external Bluetooth sensor."""
+
+    _attr_device_class = SensorDeviceClass.HUMIDITY
+    _attr_native_unit_of_measurement = PERCENTAGE
+
+    @property
+    def unique_id(self) -> str:
+        return (
+            f"quilt:{self._system_id}:remote_sensor:{self._remote_sensor_id}:humidity"
+        )
+
+    @property
+    def name(self) -> str | None:
+        return f"{self._space_name} Remote Sensor Humidity"
+
+    @property
+    def native_value(self) -> float | None:
+        remote_sensor = self._remote_sensor
+        if remote_sensor is None or remote_sensor.state is None:
+            return None
+        return remote_sensor.state.humidity_percent
+
+
+class QuiltRemoteSensorBatterySensor(_QuiltRemoteSensorBase):
+    """Battery level reported by a paired external Bluetooth sensor."""
+
+    _attr_device_class = SensorDeviceClass.BATTERY
+    _attr_native_unit_of_measurement = PERCENTAGE
+
+    @property
+    def unique_id(self) -> str:
+        return f"quilt:{self._system_id}:remote_sensor:{self._remote_sensor_id}:battery"
+
+    @property
+    def name(self) -> str | None:
+        return f"{self._space_name} Remote Sensor Battery"
+
+    @property
+    def native_value(self) -> float | None:
+        remote_sensor = self._remote_sensor
+        if remote_sensor is None or remote_sensor.state is None:
+            return None
+        return remote_sensor.state.battery_percent
 
 
 class QuiltSpaceEnergySensor(CoordinatorEntity[QuiltEnergyCoordinator], SensorEntity):

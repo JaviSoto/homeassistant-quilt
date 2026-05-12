@@ -10,6 +10,8 @@ Unofficial Home Assistant integration for Quilt HVAC.
   - brightness + RGB color
   - animation/effects (Sparkle Fade / Twinkle Fade / Dance / Chase)
 - **Fan** entities for each space (kept HA-only by default; see HomeKit notes).
+- **Sensor** entities for paired Quilt Bluetooth remote sensors, including
+  temperature, humidity, and battery level.
 
 ## Installation
 

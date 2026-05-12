@@ -175,6 +175,81 @@ def test_parse_get_home_datastore_system_response_minimal() -> None:
     assert hds.comfort_settings_by_space[space_id]
 
 
+def test_parse_get_home_datastore_system_response_remote_sensor() -> None:
+    system_id = "sys-1"
+    space_id = "space-1"
+    indoor_unit_id = "iu-1"
+    remote_sensor_id = "remote-1"
+
+    space_header = encode_bytes_field(1, space_id.encode("utf-8")) + encode_bytes_field(
+        4, system_id.encode("utf-8")
+    )
+    space_settings = encode_bytes_field(1, b"Office")
+    space_state = encode_bytes_field(1, _ts()) + encode_fixed32_float(3, 22.0)
+    space_msg = b"".join(
+        [
+            encode_bytes_field(1, space_header),
+            encode_bytes_field(3, space_settings),
+            encode_bytes_field(5, space_state),
+        ]
+    )
+
+    iu_header = encode_bytes_field(
+        1, indoor_unit_id.encode("utf-8")
+    ) + encode_bytes_field(4, system_id.encode("utf-8"))
+    iu_rel = encode_bytes_field(2, space_id.encode("utf-8"))
+    iu_msg = encode_bytes_field(1, iu_header) + encode_bytes_field(2, iu_rel)
+
+    sensor_header = encode_bytes_field(
+        1, remote_sensor_id.encode("utf-8")
+    ) + encode_bytes_field(4, system_id.encode("utf-8"))
+    sensor_attrs = encode_bytes_field(1, b"AA:BB:CC:DD:EE:FF") + encode_bytes_field(
+        2, _ts()
+    )
+    sensor_state = b"".join(
+        [
+            encode_fixed32_float(1, 23.25),
+            encode_fixed32_float(2, 46.5),
+            encode_fixed32_float(3, 87.0),
+            encode_varint_field(4, 4294967253),  # signed -43 encoded as uint32
+            encode_bytes_field(5, _ts()),
+        ]
+    )
+    sensor_rel = encode_bytes_field(
+        1, indoor_unit_id.encode("utf-8")
+    ) + encode_bytes_field(2, _ts())
+    sensor_controls = encode_varint_field(1, 2) + encode_bytes_field(2, _ts())
+    sensor_msg = b"".join(
+        [
+            encode_bytes_field(1, sensor_header),
+            encode_bytes_field(2, sensor_attrs),
+            encode_bytes_field(3, sensor_state),
+            encode_bytes_field(4, sensor_rel),
+            encode_bytes_field(5, sensor_controls),
+        ]
+    )
+
+    hds = parse_get_home_datastore_system_response(
+        encode_bytes_field(3, space_msg)
+        + encode_bytes_field(9, iu_msg)
+        + encode_bytes_field(18, sensor_msg)
+    )
+
+    sensor = hds.remote_sensors[remote_sensor_id]
+    assert sensor.attributes is not None
+    assert sensor.attributes.mac == "AA:BB:CC:DD:EE:FF"
+    assert sensor.relationships is not None
+    assert sensor.relationships.indoor_unit_id == indoor_unit_id
+    assert sensor.controls is not None
+    assert sensor.controls.control_mode == 2
+    assert sensor.state is not None
+    assert sensor.state.ambient_c == 23.25
+    assert sensor.state.humidity_percent == 46.5
+    assert sensor.state.battery_percent == 87.0
+    assert sensor.state.rssi == -43
+    assert hds.remote_sensors_by_indoor_unit[indoor_unit_id] == [sensor]
+
+
 def test_space_and_indoor_unit_online_follow_five_minute_freshness_rule() -> None:
     system_id = "sys-1"
     space_id = "space-1"
