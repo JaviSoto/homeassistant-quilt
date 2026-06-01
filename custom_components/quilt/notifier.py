@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 import asyncio
-import base64
-import contextlib
 import datetime
+import contextlib
 import pathlib
 import logging
 import queue
@@ -17,6 +16,7 @@ from homeassistant.core import HomeAssistant
 
 from .api import QuiltApi
 from .coordinator import QuiltCoordinator
+from .debug_dump import write_debug_dump
 from .notifier_proto import (
     QuiltNotifierConfig,
     SubscribeRequestType,
@@ -103,16 +103,16 @@ class QuiltNotifier:
                 self._reconnect.set()
 
     def _debug_dump(self, direction: str, payload: bytes) -> None:
-        if not payload:
-            return
         try:
-            self._debug_dir.mkdir(parents=True, exist_ok=True)
             ts = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
             safe_name = self._coordinator.name.replace("/", "_").replace(" ", "_")
-            path = self._debug_dir / f"{ts}.notifier_{safe_name}.{direction}.b64"
-            path.write_text(base64.b64encode(payload).decode("ascii") + "\n", encoding="utf-8")
+            write_debug_dump(
+                self._debug_dir,
+                f"{ts}.notifier_{safe_name}.{direction}.b64",
+                payload,
+            )
         except Exception:
-            # Debug-only best effort
+            # Debug-only best effort.
             return
 
     def _run_thread(self) -> None:

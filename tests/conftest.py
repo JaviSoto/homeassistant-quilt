@@ -366,6 +366,7 @@ def pytest_sessionstart(session) -> None:  # noqa: ARG001
 
     class SensorStateClass(str, enum.Enum):
         MEASUREMENT = "measurement"
+        TOTAL = "total"
 
     sensor.SensorStateClass = SensorStateClass
 

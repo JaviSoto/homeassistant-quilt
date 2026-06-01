@@ -601,7 +601,7 @@ class QuiltControllerRemoteSensorBatterySensor(_QuiltControllerRemoteSensorBase)
 class QuiltSpaceEnergySensor(CoordinatorEntity[QuiltEnergyCoordinator], SensorEntity):
     _attr_device_class = SensorDeviceClass.ENERGY
     _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
-    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_state_class = SensorStateClass.TOTAL
 
     def __init__(
         self,

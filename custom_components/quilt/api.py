@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import base64
 import json
 import logging
 import time
@@ -20,6 +19,7 @@ except ModuleNotFoundError:  # pragma: no cover
 
 from .const import DEFAULT_HOST
 from .cognito import CognitoError, refresh_with_refresh_token
+from .debug_dump import write_debug_dump
 from .notifier_proto import encode_publish_request
 from .proto_wire import encode_bytes_field, encode_string, encode_varint_field
 from .quilt_parse import (
@@ -172,11 +172,12 @@ class QuiltApi:
             return
         safe_method = method.strip("/").replace("/", "__").replace(".", "_")
         ts = datetime.now().strftime("%Y%m%d-%H%M%S")
-        self._debug_dir.mkdir(parents=True, exist_ok=True)
-        path = self._debug_dir / f"{ts}.{safe_method}.{direction}.b64"
-        data = base64.b64encode(payload).decode("ascii")
-        # Write as a single-line base64 file for easy copy/paste or diffing.
-        await asyncio.to_thread(path.write_text, data + "\n", encoding="utf-8")
+        await asyncio.to_thread(
+            write_debug_dump,
+            self._debug_dir,
+            f"{ts}.{safe_method}.{direction}.b64",
+            payload,
+        )
 
     async def async_list_systems(self) -> list[QuiltSystemInfo]:
         raw = await self._unary_unary("/core.protos.app.SystemInformationService/ListSystems", b"")
