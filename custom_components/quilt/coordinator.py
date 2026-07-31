@@ -4,7 +4,9 @@ import logging
 from dataclasses import dataclass
 from datetime import timedelta
 
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .api import QuiltApi
@@ -25,11 +27,13 @@ class QuiltCoordinator(DataUpdateCoordinator[QuiltCoordinatorData]):
         *,
         api: QuiltApi,
         system: QuiltSystemInfo,
+        config_entry: ConfigEntry,
         poll_interval_seconds: int = DEFAULT_POLL_INTERVAL_SECONDS,
     ) -> None:
         super().__init__(
             hass,
             logger=logging.getLogger(__name__),
+            config_entry=config_entry,
             name=f"Quilt {system.name}",
             update_interval=timedelta(seconds=poll_interval_seconds),
         )
@@ -38,7 +42,11 @@ class QuiltCoordinator(DataUpdateCoordinator[QuiltCoordinatorData]):
 
     async def _async_update_data(self) -> QuiltCoordinatorData:
         try:
-            hds = await self._api.async_get_home_datastore_system(self._system.system_id)
+            hds = await self._api.async_get_home_datastore_system(
+                self._system.system_id
+            )
             return QuiltCoordinatorData(system=self._system, hds=hds)
+        except ConfigEntryAuthFailed:
+            raise
         except Exception as e:
             raise UpdateFailed(str(e)) from e

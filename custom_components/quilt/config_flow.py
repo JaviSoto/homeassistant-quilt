@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import logging
+
 import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.data_entry_flow import FlowResult
+from homeassistant.data_entry_flow import AbortFlow, FlowResult
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .cognito import (
+    CognitoAuthError,
     CognitoChallenge,
     CognitoError,
     initiate_custom_auth,
@@ -27,6 +30,8 @@ from .const import (
     DOMAIN,
     MIN_POLL_INTERVAL_SECONDS,
 )
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class QuiltConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -54,13 +59,19 @@ class QuiltConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 challenge = await initiate_custom_auth(session, self._email)
                 self._challenge_session = challenge.session
                 self._challenge_username = challenge.username
-            except CognitoError:
+            except CognitoAuthError:
                 errors["base"] = "auth_failed"
+            except CognitoError:
+                _LOGGER.exception("Quilt authentication-start service failure")
+                errors["base"] = "cannot_connect"
             except Exception:
+                _LOGGER.exception("Unexpected Quilt authentication-start failure")
                 errors["base"] = "unknown"
 
             if errors:
-                return self.async_show_form(step_id="user", data_schema=self._user_schema(), errors=errors)
+                return self.async_show_form(
+                    step_id="user", data_schema=self._user_schema(), errors=errors
+                )
 
             # Proceed to code entry step.
             self.context["title_placeholders"] = {"email": self._email}
@@ -82,12 +93,20 @@ class QuiltConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             code = user_input["code"]
             try:
-                if not self._challenge_session or not self._challenge_username or not self._email:
+                if (
+                    not self._challenge_session
+                    or not self._challenge_username
+                    or not self._email
+                ):
                     return self.async_abort(reason="unknown")
 
                 session = async_get_clientsession(self.hass)
-                challenge = CognitoChallenge(session=self._challenge_session, username=self._challenge_username)
-                tokens = await respond_to_custom_challenge(session, challenge=challenge, answer=code)
+                challenge = CognitoChallenge(
+                    session=self._challenge_session, username=self._challenge_username
+                )
+                tokens = await respond_to_custom_challenge(
+                    session, challenge=challenge, answer=code
+                )
 
                 await self.async_set_unique_id(f"quilt:{self._email}")
                 self._abort_if_unique_id_configured()
@@ -101,9 +120,15 @@ class QuiltConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         CONF_REFRESH_TOKEN: tokens.refresh_token,
                     },
                 )
-            except CognitoError:
+            except CognitoAuthError:
                 errors["base"] = "invalid_code"
+            except CognitoError:
+                _LOGGER.exception("Quilt code-verification service failure")
+                errors["base"] = "cannot_connect"
+            except AbortFlow:
+                raise
             except Exception:
+                _LOGGER.exception("Unexpected Quilt code-verification failure")
                 errors["base"] = "unknown"
 
         schema = vol.Schema({vol.Required("code"): str})
@@ -127,26 +152,43 @@ class QuiltConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             challenge = await initiate_custom_auth(session, self._email)
             self._challenge_session = challenge.session
             self._challenge_username = challenge.username
-        except CognitoError:
+        except CognitoAuthError:
             errors["base"] = "auth_failed"
+        except CognitoError:
+            _LOGGER.exception("Quilt reauthentication-start service failure")
+            errors["base"] = "cannot_connect"
         except Exception:
+            _LOGGER.exception("Unexpected Quilt reauthentication-start failure")
             errors["base"] = "unknown"
 
         if errors:
-            return self.async_show_form(step_id="reauth", data_schema=vol.Schema({}), errors=errors)
+            return self.async_show_form(
+                step_id="reauth", data_schema=vol.Schema({}), errors=errors
+            )
 
         return await self.async_step_reauth_code()
 
-    async def async_step_reauth_code(self, user_input: dict | None = None) -> FlowResult:
+    async def async_step_reauth_code(
+        self, user_input: dict | None = None
+    ) -> FlowResult:
         errors: dict[str, str] = {}
         if user_input is not None:
             try:
-                if not self._challenge_session or not self._challenge_username or not self._email or not self._reauth_entry:
+                if (
+                    not self._challenge_session
+                    or not self._challenge_username
+                    or not self._email
+                    or not self._reauth_entry
+                ):
                     return self.async_abort(reason="unknown")
 
                 session = async_get_clientsession(self.hass)
-                challenge = CognitoChallenge(session=self._challenge_session, username=self._challenge_username)
-                tokens = await respond_to_custom_challenge(session, challenge=challenge, answer=user_input["code"])
+                challenge = CognitoChallenge(
+                    session=self._challenge_session, username=self._challenge_username
+                )
+                tokens = await respond_to_custom_challenge(
+                    session, challenge=challenge, answer=user_input["code"]
+                )
 
                 self.hass.config_entries.async_update_entry(
                     self._reauth_entry,
@@ -158,44 +200,50 @@ class QuiltConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 )
                 await self.hass.config_entries.async_reload(self._reauth_entry.entry_id)
                 return self.async_abort(reason="reauth_successful")
-            except CognitoError:
+            except CognitoAuthError:
                 errors["base"] = "invalid_code"
+            except CognitoError:
+                _LOGGER.exception("Quilt reauthentication service failure")
+                errors["base"] = "cannot_connect"
+            except AbortFlow:
+                raise
             except Exception:
+                _LOGGER.exception("Unexpected Quilt reauthentication failure")
                 errors["base"] = "unknown"
 
         schema = vol.Schema({vol.Required("code"): str})
-        return self.async_show_form(step_id="reauth_code", data_schema=schema, errors=errors)
+        return self.async_show_form(
+            step_id="reauth_code", data_schema=schema, errors=errors
+        )
 
     @staticmethod
     def async_get_options_flow(config_entry: ConfigEntry) -> config_entries.OptionsFlow:
-        return QuiltOptionsFlowHandler(config_entry)
+        del config_entry
+        return QuiltOptionsFlowHandler()
 
 
-class QuiltOptionsFlowHandler(config_entries.OptionsFlow):
-    def __init__(self, config_entry: ConfigEntry) -> None:
-        self._config_entry = config_entry
-
+class QuiltOptionsFlowHandler(config_entries.OptionsFlowWithReload):
     async def async_step_init(self, user_input: dict | None = None) -> FlowResult:
         if user_input is not None:
-            return self.async_create_entry(title="", data=user_input)
+            return self.async_create_entry(data=user_input)
 
         schema = vol.Schema(
             {
                 vol.Required(
                     CONF_ENABLE_NOTIFIER,
-                    default=self._config_entry.options.get(
+                    default=self.config_entry.options.get(
                         CONF_ENABLE_NOTIFIER, DEFAULT_ENABLE_NOTIFIER
                     ),
                 ): bool,
                 vol.Required(
                     CONF_POLL_INTERVAL_SECONDS,
-                    default=self._config_entry.options.get(
+                    default=self.config_entry.options.get(
                         CONF_POLL_INTERVAL_SECONDS, DEFAULT_POLL_INTERVAL_SECONDS
                     ),
                 ): vol.All(vol.Coerce(int), vol.Range(min=MIN_POLL_INTERVAL_SECONDS)),
                 vol.Required(
                     CONF_ENABLE_DEBUG_DUMPS,
-                    default=self._config_entry.options.get(
+                    default=self.config_entry.options.get(
                         CONF_ENABLE_DEBUG_DUMPS, DEFAULT_ENABLE_DEBUG_DUMPS
                     ),
                 ): bool,

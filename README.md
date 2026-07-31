@@ -53,8 +53,11 @@ See `DISCLAIMER.md`.
 ## Development
 
 - Run unit tests + coverage:
-  - `uv run --with-requirements requirements-dev.txt -- coverage run -m pytest`
-  - `uv run --with-requirements requirements-dev.txt -- coverage report --fail-under=85`
+  - `uv --directory . run --with-requirements requirements-dev.txt coverage run -m pytest -W error`
+  - `uv --directory . run --with-requirements requirements-dev.txt coverage report --fail-under=86`
+- Check the real minimum Home Assistant API contracts:
+  - `uv --directory . run --isolated --python 3.14 --with homeassistant==2026.3.0 --with grpcio==1.78.0 python -m scripts.smoke_ha_2026_3`
+  - This is a narrow API smoke for the real Home Assistant 2026.3.0 floor, not a full Home Assistant runtime test.
 
 ## Issues
 

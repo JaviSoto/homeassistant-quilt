@@ -54,6 +54,7 @@ def pytest_sessionstart(session) -> None:  # noqa: ARG001
             self.data = {}
             self.loop = None
             self.is_running = True
+            self.state = CoreState.running
             self.bus = types.SimpleNamespace(async_listen_once=lambda *a, **k: None)
             self.config = types.SimpleNamespace(
                 path=lambda p="": f"/tmp/{p}".rstrip("/"),
@@ -84,6 +85,11 @@ def pytest_sessionstart(session) -> None:  # noqa: ARG001
 
             self.config_entries = _ConfigEntries()
 
+    class CoreState(enum.Enum):
+        starting = "starting"
+        running = "running"
+
+    core.CoreState = CoreState
     core.HomeAssistant = HomeAssistant
 
     const = _ensure_pkg("homeassistant.const")
@@ -114,6 +120,11 @@ def pytest_sessionstart(session) -> None:  # noqa: ARG001
             self.data = {}
             self.options = {}
             self.entry_id = "test"
+            self.reauth_started = False
+
+        def async_start_reauth(self, hass) -> None:  # noqa: ANN001
+            del hass
+            self.reauth_started = True
 
     config_entries.ConfigEntry = ConfigEntry
 
@@ -150,8 +161,13 @@ def pytest_sessionstart(session) -> None:  # noqa: ARG001
     config_entries.ConfigFlow = ConfigFlow
 
     class OptionsFlow:
-        def __init__(self, config_entry):  # noqa: ANN001
-            self._config_entry = config_entry
+        def __init__(self) -> None:
+            self.hass = None
+            self.handler = None
+
+        @property
+        def config_entry(self):  # noqa: ANN201
+            return self.hass.config_entries.async_get_entry(self.handler)
 
         def async_show_form(
             self, *, step_id, data_schema=None, errors=None
@@ -163,10 +179,15 @@ def pytest_sessionstart(session) -> None:  # noqa: ARG001
                 "schema": data_schema,
             }
 
-        def async_create_entry(self, *, title, data):  # noqa: ANN001
+        def async_create_entry(self, *, data, title=""):  # noqa: ANN001
             return {"type": "create_entry", "title": title, "data": data}
 
     config_entries.OptionsFlow = OptionsFlow
+
+    class OptionsFlowWithReload(OptionsFlow):
+        automatic_reload = True
+
+    config_entries.OptionsFlowWithReload = OptionsFlowWithReload
 
     # Also allow `from homeassistant import config_entries`.
     ha.config_entries = config_entries
@@ -174,6 +195,16 @@ def pytest_sessionstart(session) -> None:  # noqa: ARG001
     # --- data_entry_flow
     data_entry_flow = _ensure_pkg("homeassistant.data_entry_flow")
     data_entry_flow.FlowResult = dict
+
+    class AbortFlow(Exception):
+        def __init__(
+            self, reason: str, description_placeholders=None
+        ) -> None:  # noqa: ANN001
+            del description_placeholders
+            self.reason = reason
+            super().__init__(reason)
+
+    data_entry_flow.AbortFlow = AbortFlow
 
     # --- aiohttp client helper
     aiohttp_client = _ensure_pkg("homeassistant.helpers.aiohttp_client")
@@ -215,19 +246,30 @@ def pytest_sessionstart(session) -> None:  # noqa: ARG001
             return cls
 
         def __init__(
-            self, hass, *, logger=None, name="", update_interval=None
+            self,
+            hass,
+            *,
+            logger=None,
+            config_entry=None,
+            name="",
+            update_interval=None,
         ):  # noqa: ANN001
             self.hass = hass
             self.logger = logger
+            self.config_entry = config_entry
             self.name = name
             self.update_interval = update_interval
             self.data = None
 
         async def async_request_refresh(self) -> None:
-            return None
+            try:
+                self.data = await self._async_update_data()
+            except ConfigEntryAuthFailed:
+                if self.config_entry is not None:
+                    self.config_entry.async_start_reauth(self.hass)
 
         async def async_config_entry_first_refresh(self) -> None:
-            return None
+            self.data = await self._async_update_data()
 
         def async_add_listener(self, cb):  # noqa: ANN001
             def unsub():

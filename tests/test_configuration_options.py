@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import asyncio
 from datetime import timedelta
+from types import SimpleNamespace
 
 import pytest
 import voluptuous as vol
 
-from custom_components.quilt import _async_options_update_listener
 from custom_components.quilt.config_flow import QuiltOptionsFlowHandler
 from custom_components.quilt.const import (
     CONF_ENABLE_DEBUG_DUMPS,
@@ -21,6 +21,8 @@ from custom_components.quilt.quilt_parse import QuiltSystemInfo
 
 
 def test_coordinator_uses_configured_poll_interval() -> None:
+    from homeassistant.config_entries import ConfigEntry
+
     system = QuiltSystemInfo(system_id="sys", name="X", timezone="UTC")
 
     class FakeApi:
@@ -31,6 +33,7 @@ def test_coordinator_uses_configured_poll_interval() -> None:
         hass=None,  # type: ignore[arg-type]
         api=FakeApi(),
         system=system,
+        config_entry=ConfigEntry(),
         poll_interval_seconds=10,
     )
 
@@ -41,7 +44,11 @@ def test_options_flow_exposes_safe_defaults_and_accepts_our_override() -> None:
     from homeassistant.config_entries import ConfigEntry
 
     entry = ConfigEntry()
-    handler = QuiltOptionsFlowHandler(entry)
+    handler = QuiltOptionsFlowHandler()
+    handler.hass = SimpleNamespace(
+        config_entries=SimpleNamespace(async_get_entry=lambda entry_id: entry)
+    )
+    handler.handler = entry.entry_id
     result = asyncio.run(handler.async_step_init(None))
 
     schema = result["schema"]
@@ -71,49 +78,10 @@ def test_options_flow_exposes_safe_defaults_and_accepts_our_override() -> None:
         )
 
 
-def test_options_update_reloads_loaded_entry() -> None:
-    class FakeConfigEntries:
-        def __init__(self) -> None:
-            self.reloaded_entry_id: str | None = None
+def test_options_flow_is_automatic_reload_handler() -> None:
+    from homeassistant import config_entries
 
-        async def async_reload(self, entry_id: str) -> None:
-            self.reloaded_entry_id = entry_id
+    handler = QuiltOptionsFlowHandler()
 
-    class FakeHass:
-        def __init__(self) -> None:
-            self.config_entries = FakeConfigEntries()
-
-    hass = FakeHass()
-    entry = type("Entry", (), {"entry_id": "entry-id", "options": {}})()
-    listener = _async_options_update_listener(entry)
-    entry.options = {CONF_POLL_INTERVAL_SECONDS: 10}
-
-    asyncio.run(listener(hass, entry))
-
-    assert hass.config_entries.reloaded_entry_id == "entry-id"
-
-
-def test_data_update_does_not_reload_loaded_entry() -> None:
-    class FakeConfigEntries:
-        def __init__(self) -> None:
-            self.reload_count = 0
-
-        async def async_reload(self, entry_id: str) -> None:
-            del entry_id
-            self.reload_count += 1
-
-    class FakeEntry:
-        entry_id = "entry-id"
-        options: dict[str, object] = {}
-
-    class FakeHass:
-        def __init__(self) -> None:
-            self.config_entries = FakeConfigEntries()
-
-    hass = FakeHass()
-    entry = FakeEntry()
-    listener = _async_options_update_listener(entry)
-
-    asyncio.run(listener(hass, entry))
-
-    assert hass.config_entries.reload_count == 0
+    assert isinstance(handler, config_entries.OptionsFlowWithReload)
+    assert handler.automatic_reload is True

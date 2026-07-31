@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import base64
-from dataclasses import dataclass
+
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.exceptions import ConfigEntryAuthFailed
 
 from custom_components.quilt.api import QuiltApi, QuiltApiConfig
 from custom_components.quilt.coordinator import QuiltCoordinator
+from custom_components.quilt.energy_coordinator import QuiltEnergyCoordinator
 from custom_components.quilt.proto_wire import decode_message, get_first
 from custom_components.quilt.quilt_parse import (
     QuiltHdsSystem,
@@ -19,12 +22,27 @@ from custom_components.quilt.quilt_parse import (
 
 
 def _fake_jwt(exp_unix: int) -> str:
-    payload = base64.urlsafe_b64encode(f'{{"exp":{exp_unix}}}'.encode("utf-8")).decode("ascii").rstrip("=")
+    payload = (
+        base64.urlsafe_b64encode(f'{{"exp":{exp_unix}}}'.encode("utf-8"))
+        .decode("ascii")
+        .rstrip("=")
+    )
     return f"aaaa.{payload}.bbbb"
 
 
+def test_api_recognizes_future_jwt_expiry() -> None:
+    api = QuiltApi(
+        QuiltApiConfig(host="example.com", id_token=_fake_jwt(4_000_000_000)),
+        aiohttp_session=None,
+    )
+
+    assert api.token_expires_soon() is False
+
+
 class _FakeUnaryUnary:
-    def __init__(self, *, method: str, record: list[tuple[str, bytes, list[tuple[str, str]]]]):
+    def __init__(
+        self, *, method: str, record: list[tuple[str, bytes, list[tuple[str, str]]]]
+    ):
         self._method = method
         self._record = record
 
@@ -37,21 +55,29 @@ class _FakeChannel:
     def __init__(self) -> None:
         self.calls: list[tuple[str, bytes, list[tuple[str, str]]]] = []
 
-    def unary_unary(self, method: str, request_serializer=None, response_deserializer=None):  # noqa: ANN001
+    def unary_unary(
+        self, method: str, request_serializer=None, response_deserializer=None
+    ):  # noqa: ANN001
         return _FakeUnaryUnary(method=method, record=self.calls)
 
     def close(self) -> None:
         return None
 
 
-def test_api_refreshes_token_and_calls_update_indoor_unit(monkeypatch) -> None:  # noqa: ANN001
+def test_api_refreshes_token_and_calls_update_indoor_unit(
+    monkeypatch,
+) -> None:  # noqa: ANN001
     import custom_components.quilt.api as api_mod
 
     refreshed: list[tuple[str, str]] = []
 
     async def fake_refresh(session, refresh_token: str):  # noqa: ANN001
         refreshed.append((session, refresh_token))
-        return type("T", (), {"id_token": _fake_jwt(9_999_999_999), "refresh_token": "new_refresh"})()
+        return type(
+            "T",
+            (),
+            {"id_token": _fake_jwt(9_999_999_999), "refresh_token": "new_refresh"},
+        )()
 
     monkeypatch.setattr(api_mod, "refresh_with_refresh_token", fake_refresh)
 
@@ -83,7 +109,9 @@ def test_coordinator_wraps_update_errors(monkeypatch) -> None:  # noqa: ANN001
         async def async_get_home_datastore_system(self, system_id: str):  # noqa: ANN001
             raise RuntimeError("boom")
 
-    c = QuiltCoordinator(hass=None, api=FakeApi(), system=system)  # type: ignore[arg-type]
+    c = QuiltCoordinator(
+        hass=None, api=FakeApi(), system=system, config_entry=ConfigEntry()
+    )  # type: ignore[arg-type]
     try:
         asyncio.run(c._async_update_data())  # noqa: SLF001
     except Exception as e:
@@ -92,11 +120,60 @@ def test_coordinator_wraps_update_errors(monkeypatch) -> None:  # noqa: ANN001
         raise AssertionError("expected exception")
 
 
+def test_coordinator_propagates_auth_failures() -> None:
+    system = QuiltSystemInfo(system_id="sys", name="X", timezone="UTC")
+    entry = ConfigEntry()
+
+    class FakeApi:
+        async def async_get_home_datastore_system(self, system_id: str):  # noqa: ANN001
+            raise ConfigEntryAuthFailed("invalid refresh token")
+
+    coordinator = QuiltCoordinator(
+        hass=None,
+        api=FakeApi(),
+        system=system,
+        config_entry=entry,  # type: ignore[arg-type]
+    )
+    try:
+        asyncio.run(coordinator._async_update_data())  # noqa: SLF001
+    except ConfigEntryAuthFailed as error:
+        assert "invalid refresh token" in str(error)
+    else:
+        raise AssertionError("expected ConfigEntryAuthFailed")
+
+    asyncio.run(coordinator.async_request_refresh())
+    assert coordinator.config_entry is entry
+    assert entry.reauth_started is True
+
+
+def test_energy_coordinator_owns_config_entry_for_post_load_reauth() -> None:
+    entry = ConfigEntry()
+    system = QuiltSystemInfo(system_id="sys", name="X", timezone="UTC")
+
+    class FakeApi:
+        async def async_get_energy_metrics(self, **kwargs):  # noqa: ANN003
+            raise ConfigEntryAuthFailed("invalid refresh token")
+
+    coordinator = QuiltEnergyCoordinator(
+        hass=None,  # type: ignore[arg-type]
+        api=FakeApi(),
+        system=system,
+        config_entry=entry,
+    )
+
+    asyncio.run(coordinator.async_request_refresh())
+
+    assert coordinator.config_entry is entry
+    assert entry.reauth_started is True
+
+
 def test_coordinator_success(monkeypatch) -> None:  # noqa: ANN001
     system = QuiltSystemInfo(system_id="sys", name="X", timezone="UTC")
 
     space = QuiltSpace(
-        header=QuiltSpaceHeader(space_id="s1", created=None, updated=None, system_id="sys"),
+        header=QuiltSpaceHeader(
+            space_id="s1", created=None, updated=None, system_id="sys"
+        ),
         relationships_parent_space_id="root",
         settings=QuiltSpaceSettings(name="Office", timezone="UTC"),
         controls=QuiltSpaceControls(
@@ -109,7 +186,13 @@ def test_coordinator_success(monkeypatch) -> None:  # noqa: ANN001
             comfort_setting_override=None,
             comfort_setting_id=None,
         ),
-        state=QuiltSpaceState(updated=None, setpoint_c=20.0, ambient_c=21.0, hvac_state=1, comfort_setting_id=None),
+        state=QuiltSpaceState(
+            updated=None,
+            setpoint_c=20.0,
+            ambient_c=21.0,
+            hvac_state=1,
+            comfort_setting_id=None,
+        ),
     )
 
     hds = QuiltHdsSystem(
@@ -126,7 +209,9 @@ def test_coordinator_success(monkeypatch) -> None:  # noqa: ANN001
         async def async_get_home_datastore_system(self, system_id: str):  # noqa: ANN001
             return hds
 
-    c = QuiltCoordinator(hass=None, api=FakeApi(), system=system)  # type: ignore[arg-type]
+    c = QuiltCoordinator(
+        hass=None, api=FakeApi(), system=system, config_entry=ConfigEntry()
+    )  # type: ignore[arg-type]
     data = asyncio.run(c._async_update_data())  # noqa: SLF001
     assert data.system.system_id == "sys"
     assert "s1" in data.hds.spaces

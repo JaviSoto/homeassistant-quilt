@@ -4,7 +4,9 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .api import QuiltApi
@@ -25,11 +27,13 @@ class QuiltEnergyCoordinator(DataUpdateCoordinator[QuiltEnergyCoordinatorData]):
         *,
         api: QuiltApi,
         system: QuiltSystemInfo,
+        config_entry: ConfigEntry,
         lookback_days: int = DEFAULT_ENERGY_LOOKBACK_DAYS,
     ) -> None:
         super().__init__(
             hass,
             logger=logging.getLogger(__name__),
+            config_entry=config_entry,
             name=f"Quilt {system.name} energy",
             update_interval=timedelta(seconds=DEFAULT_ENERGY_POLL_INTERVAL_SECONDS),
         )
@@ -51,5 +55,7 @@ class QuiltEnergyCoordinator(DataUpdateCoordinator[QuiltEnergyCoordinatorData]):
                 fetched_at=now,
                 metrics_by_space_id={m.space_id: m for m in metrics},
             )
+        except ConfigEntryAuthFailed:
+            raise
         except Exception as e:
             raise UpdateFailed(str(e)) from e

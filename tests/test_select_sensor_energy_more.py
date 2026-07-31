@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timedelta, timezone
 
+from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import UpdateFailed
 
 from custom_components.quilt.energy_coordinator import QuiltEnergyCoordinator
@@ -23,6 +24,12 @@ from custom_components.quilt.quilt_parse import (
     QuiltIndoorUnitHeader,
     QuiltIndoorUnitRelationships,
     QuiltIndoorUnitState,
+    QuiltRemoteSensor,
+    QuiltRemoteSensorAttributes,
+    QuiltRemoteSensorControls,
+    QuiltRemoteSensorHeader,
+    QuiltRemoteSensorRelationships,
+    QuiltRemoteSensorState,
     QuiltSpace,
     QuiltSpaceControls,
     QuiltSpaceEnergyMetrics,
@@ -31,17 +38,9 @@ from custom_components.quilt.quilt_parse import (
     QuiltSpaceState,
     QuiltSystemInfo,
     QuiltTimestamp,
-    QuiltRemoteSensor,
-    QuiltRemoteSensorAttributes,
-    QuiltRemoteSensorControls,
-    QuiltRemoteSensorHeader,
-    QuiltRemoteSensorRelationships,
-    QuiltRemoteSensorState,
 )
-from custom_components.quilt.select import (
-    QuiltLouverModeSelect,
-    async_setup_entry as select_setup_entry,
-)
+from custom_components.quilt.select import QuiltLouverModeSelect
+from custom_components.quilt.select import async_setup_entry as select_setup_entry
 from custom_components.quilt.sensor import (
     QuiltControllerAmbientTemperatureSensor,
     QuiltIndoorUnitAmbientTemperatureSensor,
@@ -51,8 +50,8 @@ from custom_components.quilt.sensor import (
     QuiltSpaceEnergySensor,
     _is_real_space,
     _safe_zoneinfo,
-    async_setup_entry as sensor_setup_entry,
 )
+from custom_components.quilt.sensor import async_setup_entry as sensor_setup_entry
 
 
 class _FakeApi:
@@ -439,6 +438,7 @@ def test_sensor_setup_adds_paired_remote_sensor_entities() -> None:
 
 
 def test_energy_coordinator_update_success_and_error() -> None:
+    from homeassistant.config_entries import ConfigEntry
     from homeassistant.core import HomeAssistant
 
     class _GoodApi:
@@ -460,6 +460,7 @@ def test_energy_coordinator_update_success_and_error() -> None:
         HomeAssistant(),
         api=good_api,
         system=QuiltSystemInfo(system_id="sys-1", name="Home", timezone="UTC"),
+        config_entry=ConfigEntry(),
         lookback_days=999,
     )
     data = asyncio.run(c._async_update_data())  # noqa: SLF001
@@ -475,6 +476,7 @@ def test_energy_coordinator_update_success_and_error() -> None:
         HomeAssistant(),
         api=_BadApi(),
         system=QuiltSystemInfo(system_id="sys-1", name="Home", timezone="UTC"),
+        config_entry=ConfigEntry(),
         lookback_days=0,
     )
     assert c2._lookback_days == 1  # noqa: SLF001
@@ -485,6 +487,23 @@ def test_energy_coordinator_update_success_and_error() -> None:
         assert "nope" in str(exc)
     else:
         raise AssertionError("expected UpdateFailed")
+
+    class _AuthApi:
+        async def async_get_energy_metrics(self, **kwargs):  # noqa: ANN003
+            raise ConfigEntryAuthFailed("invalid refresh token")
+
+    c3 = QuiltEnergyCoordinator(
+        HomeAssistant(),
+        api=_AuthApi(),
+        system=QuiltSystemInfo(system_id="sys-1", name="Home", timezone="UTC"),
+        config_entry=ConfigEntry(),
+    )
+    try:
+        asyncio.run(c3._async_update_data())  # noqa: SLF001
+    except ConfigEntryAuthFailed as error:
+        assert "invalid refresh token" in str(error)
+    else:
+        raise AssertionError("expected ConfigEntryAuthFailed")
 
 
 def test_sensor_helpers_and_value_paths(monkeypatch) -> None:  # noqa: ANN001

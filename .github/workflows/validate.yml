@@ -3,6 +3,7 @@ name: validate
 on:
   push:
   pull_request:
+  workflow_call:
 
 jobs:
   hassfest:
@@ -17,9 +18,24 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: "3.14"
       - uses: astral-sh/setup-uv@v6
       - name: Run tests with coverage
         run: |
-          uv run --with-requirements requirements-dev.txt coverage run -m pytest
-          uv run --with-requirements requirements-dev.txt coverage report --fail-under=85
+          uv run --with-requirements requirements-dev.txt coverage run -m pytest -W error
+          uv run --with-requirements requirements-dev.txt coverage report --fail-under=86
+
+  home-assistant-floor:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - uses: astral-sh/setup-uv@v6
+      - name: Check Home Assistant 2026.3 minimum API contracts
+        run: |
+          uv run --isolated \
+            --with homeassistant==2026.3.0 \
+            --with grpcio==1.78.0 \
+            python -m scripts.smoke_ha_2026_3

@@ -13,7 +13,7 @@ trap 'rm -rf "$TMP"' EXIT
 mkdir -p "$TMP/custom_components"
 cp -R "$ROOT/custom_components/quilt" "$TMP/custom_components/quilt"
 
-# Keep release artifact deterministic and free of local bytecode/cache files.
+# Exclude local bytecode/cache files from the release artifact.
 find "$TMP/custom_components" -type d -name '__pycache__' -prune -exec rm -rf {} +
 find "$TMP/custom_components" -type f -name '*.pyc' -delete
 

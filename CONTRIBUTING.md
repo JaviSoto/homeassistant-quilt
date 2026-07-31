@@ -26,9 +26,21 @@ This repo intentionally avoids depending on the full Home Assistant Python tree 
 Using `uv` (recommended):
 
 ```bash
-uv run --with-requirements requirements-dev.txt -- coverage run -m pytest
-uv run --with-requirements requirements-dev.txt -- coverage report --fail-under=85
+uv --directory . run --with-requirements requirements-dev.txt coverage run -m pytest -W error
+uv --directory . run --with-requirements requirements-dev.txt coverage report --fail-under=86
 ```
+
+### Minimum Home Assistant compatibility smoke
+
+The unit tests use a small fake Home Assistant package. Run this isolated smoke
+against the real minimum supported API contract as well:
+
+```bash
+uv --directory . run --isolated --python 3.14 --with homeassistant==2026.3.0 --with grpcio==1.78.0 python -m scripts.smoke_ha_2026_3
+```
+
+This validates the real Home Assistant 2026.3.0 API contracts. It is a narrow
+API smoke, not a full Home Assistant runtime test.
 
 ### Local smoke check
 

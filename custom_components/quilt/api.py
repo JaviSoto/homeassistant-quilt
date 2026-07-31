@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import logging
 import time
@@ -14,20 +15,22 @@ import grpc
 try:
     from homeassistant.exceptions import ConfigEntryAuthFailed
 except ModuleNotFoundError:  # pragma: no cover
+
     class ConfigEntryAuthFailed(RuntimeError):
         pass
 
+
+from .cognito import CognitoAuthError, refresh_with_refresh_token
 from .const import DEFAULT_HOST
-from .cognito import CognitoError, refresh_with_refresh_token
 from .debug_dump import write_debug_dump
 from .notifier_proto import encode_publish_request
 from .proto_wire import encode_bytes_field, encode_string, encode_varint_field
 from .quilt_parse import (
     QuiltHdsSystem,
-    QuiltSystemInfo,
     QuiltSpaceEnergyMetrics,
-    parse_get_home_datastore_system_response,
+    QuiltSystemInfo,
     parse_get_energy_metrics_response,
+    parse_get_home_datastore_system_response,
     parse_list_systems_response,
 )
 
@@ -57,7 +60,9 @@ class QuiltApi:
         self._refresh_token = config.refresh_token
         self._aiohttp_session = aiohttp_session
         self._token_update_callback = token_update_callback
-        self._debug_dir = Path(config.debug_dir).expanduser() if config.debug_dir else None
+        self._debug_dir = (
+            Path(config.debug_dir).expanduser() if config.debug_dir else None
+        )
         self._token_lock = asyncio.Lock()
 
     async def async_connect(self) -> None:
@@ -129,11 +134,13 @@ class QuiltApi:
             if not self.token_expires_soon():
                 return
             if not self._refresh_token:
-                raise CognitoError("missing refresh token")
+                raise ConfigEntryAuthFailed("missing refresh token")
 
             try:
-                tokens = await refresh_with_refresh_token(self._aiohttp_session, refresh_token=self._refresh_token)
-            except CognitoError as e:
+                tokens = await refresh_with_refresh_token(
+                    self._aiohttp_session, refresh_token=self._refresh_token
+                )
+            except CognitoAuthError as e:
                 raise ConfigEntryAuthFailed(str(e)) from e
             self._id_token = tokens.id_token
             if tokens.refresh_token:
@@ -161,6 +168,13 @@ class QuiltApi:
             resp = await asyncio.to_thread(_do_call)
         except grpc.RpcError as e:
             _LOGGER.error("Quilt gRPC error %s: %s", method, e)
+            code_method = getattr(e, "code", None)
+            try:
+                status = code_method() if callable(code_method) else None
+            except Exception:
+                status = None
+            if status is grpc.StatusCode.UNAUTHENTICATED:
+                raise ConfigEntryAuthFailed(str(e)) from e
             raise
 
         _LOGGER.debug("Quilt gRPC response %s len=%d", method, len(resp))
@@ -172,15 +186,20 @@ class QuiltApi:
             return
         safe_method = method.strip("/").replace("/", "__").replace(".", "_")
         ts = datetime.now().strftime("%Y%m%d-%H%M%S")
-        await asyncio.to_thread(
-            write_debug_dump,
-            self._debug_dir,
-            f"{ts}.{safe_method}.{direction}.b64",
-            payload,
-        )
+        try:
+            await asyncio.to_thread(
+                write_debug_dump,
+                self._debug_dir,
+                f"{ts}.{safe_method}.{direction}.b64",
+                payload,
+            )
+        except Exception:
+            _LOGGER.debug("Unable to write Quilt API debug dump", exc_info=True)
 
     async def async_list_systems(self) -> list[QuiltSystemInfo]:
-        raw = await self._unary_unary("/core.protos.app.SystemInformationService/ListSystems", b"")
+        raw = await self._unary_unary(
+            "/core.protos.app.SystemInformationService/ListSystems", b""
+        )
         return parse_list_systems_response(raw)
 
     async def async_get_home_datastore_system(self, system_id: str) -> QuiltHdsSystem:
@@ -215,14 +234,20 @@ class QuiltApi:
                 encode_varint_field(4, int(preferred_time_resolution)),
             ]
         )
-        raw = await self._unary_unary("/core.protos.app.SystemInformationService/GetEnergyMetrics", req)
+        raw = await self._unary_unary(
+            "/core.protos.app.SystemInformationService/GetEnergyMetrics", req
+        )
         return parse_get_energy_metrics_response(raw)
 
     async def async_update_space(self, *, space_message: bytes) -> bytes:
         req = encode_bytes_field(1, space_message)
-        return await self._unary_unary("/core.protos.home_datastore.HomeDatastoreService/UpdateSpace", req)
+        return await self._unary_unary(
+            "/core.protos.home_datastore.HomeDatastoreService/UpdateSpace", req
+        )
 
-    async def async_update_comfort_setting(self, *, comfort_setting_message: bytes) -> bytes:
+    async def async_update_comfort_setting(
+        self, *, comfort_setting_message: bytes
+    ) -> bytes:
         req = encode_bytes_field(1, comfort_setting_message)
         return await self._unary_unary(
             "/core.protos.home_datastore.HomeDatastoreService/UpdateComfortSetting",

@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import base64
+import threading
 from pathlib import Path
 
 DEFAULT_DEBUG_MAX_FILES = 500
 DEFAULT_DEBUG_MAX_BYTES = 50 * 1024 * 1024
+_DEBUG_DUMP_LOCK = threading.Lock()
 
 
 def write_debug_dump(
@@ -19,10 +21,20 @@ def write_debug_dump(
     if not payload:
         return
 
-    debug_dir.mkdir(parents=True, exist_ok=True)
-    path = debug_dir / filename
-    path.write_text(base64.b64encode(payload).decode("ascii") + "\n", encoding="utf-8")
-    _prune_debug_dir(debug_dir, max_files=max_files, max_bytes=max_bytes)
+    with _DEBUG_DUMP_LOCK:
+        debug_dir.mkdir(parents=True, exist_ok=True)
+        path = debug_dir / filename
+        if path.exists():
+            stem = path.stem
+            suffix = path.suffix
+            counter = 1
+            while path.exists():
+                path = debug_dir / f"{stem}.{counter}{suffix}"
+                counter += 1
+        path.write_text(
+            base64.b64encode(payload).decode("ascii") + "\n", encoding="utf-8"
+        )
+        _prune_debug_dir(debug_dir, max_files=max_files, max_bytes=max_bytes)
 
 
 def _prune_debug_dir(debug_dir: Path, *, max_files: int, max_bytes: int) -> None:

@@ -6,7 +6,14 @@ on:
       - "v*"
 
 jobs:
+  validate:
+    uses: ./.github/workflows/validate.yml
+
+  hacs:
+    uses: ./.github/workflows/hacs.yml
+
   build:
+    needs: [validate, hacs]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -22,4 +29,3 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: quilt.zip
-
