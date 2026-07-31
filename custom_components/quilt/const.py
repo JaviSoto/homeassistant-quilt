@@ -7,7 +7,8 @@ DEFAULT_HOST = "api.prod.quilt.cloud:443"
 # How often we refresh the full HomeDatastore snapshot from Quilt.
 # Real-time updates are handled via the Notifier stream, but polling remains
 # as a fallback (and for ambient/state changes if notifications lag).
-DEFAULT_POLL_INTERVAL_SECONDS = 10
+DEFAULT_POLL_INTERVAL_SECONDS = 30
+MIN_POLL_INTERVAL_SECONDS = 10
 
 # Quilt auth (Cognito User Pools)
 # Derived from a mitmproxy capture of the Quilt iOS app login flow.
@@ -24,6 +25,11 @@ CONF_ACCEPT_TERMS = "accept_terms"
 
 CONF_ENABLE_NOTIFIER = "enable_notifier"
 DEFAULT_ENABLE_NOTIFIER = True
+
+CONF_ENABLE_DEBUG_DUMPS = "enable_debug_dumps"
+DEFAULT_ENABLE_DEBUG_DUMPS = False
+
+CONF_POLL_INTERVAL_SECONDS = "poll_interval_seconds"
 
 # Energy metrics polling (hourly buckets, derived from Quilt app behavior).
 DEFAULT_ENERGY_LOOKBACK_DAYS = 7

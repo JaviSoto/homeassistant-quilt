@@ -19,8 +19,17 @@ except ModuleNotFoundError:  # pragma: no cover
 else:
     HAS_HA = True
     from .api import QuiltApi, QuiltApiConfig
+    from .const import (
+        CONF_ENABLE_DEBUG_DUMPS,
+        CONF_ENABLE_NOTIFIER,
+        CONF_POLL_INTERVAL_SECONDS,
+        DEFAULT_ENABLE_DEBUG_DUMPS,
+        DEFAULT_ENABLE_NOTIFIER,
+        DEFAULT_HOST,
+        DEFAULT_POLL_INTERVAL_SECONDS,
+        DOMAIN,
+    )
     from .coordinator import QuiltCoordinator
-    from .const import CONF_ENABLE_NOTIFIER, DEFAULT_ENABLE_NOTIFIER, DEFAULT_HOST, DOMAIN
     from .energy_coordinator import QuiltEnergyCoordinator
     from .notifier import QuiltNotifier
 
@@ -37,7 +46,29 @@ else:
 
 if HAS_HA:
 
+    def _async_options_update_listener(entry: ConfigEntry):
+        """Return an entry listener that reloads only when options change."""
+        previous_options = dict(entry.options)
+
+        async def _update_listener(hass: HomeAssistant, updated_entry: ConfigEntry) -> None:
+            nonlocal previous_options
+            current_options = dict(updated_entry.options)
+            if current_options == previous_options:
+                return
+            previous_options = current_options
+            await hass.config_entries.async_reload(updated_entry.entry_id)
+
+        return _update_listener
+
     async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+        enable_debug_dumps = entry.options.get(
+            CONF_ENABLE_DEBUG_DUMPS, DEFAULT_ENABLE_DEBUG_DUMPS
+        )
+        debug_dir = hass.config.path(".quilt_debug") if enable_debug_dumps else None
+        poll_interval_seconds = int(
+            entry.options.get(CONF_POLL_INTERVAL_SECONDS, DEFAULT_POLL_INTERVAL_SECONDS)
+        )
+
         def _persist_tokens(id_token: str, refresh_token: str) -> None:
             hass.config_entries.async_update_entry(
                 entry,
@@ -54,7 +85,7 @@ if HAS_HA:
                 email=entry.data.get("email", ""),
                 id_token=entry.data.get("id_token", ""),
                 refresh_token=entry.data.get("refresh_token", ""),
-                debug_dir=hass.config.path(".quilt_debug"),
+                debug_dir=debug_dir,
             ),
             aiohttp_session=async_get_clientsession(hass),
             token_update_callback=_persist_tokens,
@@ -67,7 +98,13 @@ if HAS_HA:
             raise ConfigEntryNotReady(f"Quilt API not ready (list systems): {e}") from e
 
         coordinators: dict[str, QuiltCoordinator] = {
-            sysinfo.system_id: QuiltCoordinator(hass, api=api, system=sysinfo) for sysinfo in systems
+            sysinfo.system_id: QuiltCoordinator(
+                hass,
+                api=api,
+                system=sysinfo,
+                poll_interval_seconds=poll_interval_seconds,
+            )
+            for sysinfo in systems
         }
 
         # Ensure coordinators have data before we forward platform setups, so platform
@@ -81,7 +118,9 @@ if HAS_HA:
             raise ConfigEntryNotReady(f"Quilt API not ready (initial refresh): {e}") from e
 
         notifiers: dict[str, QuiltNotifier] = {
-            system_id: QuiltNotifier(hass, api=api, coordinator=coordinator)
+            system_id: QuiltNotifier(
+                hass, api=api, coordinator=coordinator, debug_dir=debug_dir
+            )
             for system_id, coordinator in coordinators.items()
         }
 
@@ -122,6 +161,7 @@ if HAS_HA:
             hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _start_notifiers)
 
         await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+        entry.async_on_unload(entry.add_update_listener(_async_options_update_listener(entry)))
         return True
 
     async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

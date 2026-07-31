@@ -1,17 +1,16 @@
 from __future__ import annotations
 
 import asyncio
-import datetime
 import contextlib
-import pathlib
+import datetime
 import logging
+import pathlib
 import queue
 import threading
 import time
 from typing import Final
 
 import grpc
-
 from homeassistant.core import HomeAssistant
 
 from .api import QuiltApi
@@ -44,6 +43,7 @@ class QuiltNotifier:
         api: QuiltApi,
         coordinator: QuiltCoordinator,
         config: QuiltNotifierConfig | None = None,
+        debug_dir: str | pathlib.Path | None = None,
     ) -> None:
         self._hass = hass
         self._api = api
@@ -57,7 +57,7 @@ class QuiltNotifier:
         self._lock = threading.Lock()
         self._desired_topics: set[str] = set()
         self._reconnect = threading.Event()
-        self._debug_dir = pathlib.Path(hass.config.path(".quilt_debug"))
+        self._debug_dir = pathlib.Path(debug_dir) if debug_dir else None
 
     def start(self) -> None:
         if self._thread is not None:
@@ -103,6 +103,8 @@ class QuiltNotifier:
                 self._reconnect.set()
 
     def _debug_dump(self, direction: str, payload: bytes) -> None:
+        if self._debug_dir is None:
+            return
         try:
             ts = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
             safe_name = self._coordinator.name.replace("/", "_").replace(" ", "_")
@@ -112,8 +114,8 @@ class QuiltNotifier:
                 payload,
             )
         except Exception:
-            # Debug-only best effort.
-            return
+            # Debug-only best effort, but leave a diagnostic trail when enabled.
+            _LOGGER.debug("Unable to write Quilt notifier debug dump", exc_info=True)
 
     def _run_thread(self) -> None:
         """Runs the notifier loop in a background thread.

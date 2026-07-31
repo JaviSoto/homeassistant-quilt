@@ -19,12 +19,19 @@ class QuiltCoordinatorData:
 
 
 class QuiltCoordinator(DataUpdateCoordinator[QuiltCoordinatorData]):
-    def __init__(self, hass: HomeAssistant, *, api: QuiltApi, system: QuiltSystemInfo) -> None:
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        *,
+        api: QuiltApi,
+        system: QuiltSystemInfo,
+        poll_interval_seconds: int = DEFAULT_POLL_INTERVAL_SECONDS,
+    ) -> None:
         super().__init__(
             hass,
             logger=logging.getLogger(__name__),
             name=f"Quilt {system.name}",
-            update_interval=timedelta(seconds=DEFAULT_POLL_INTERVAL_SECONDS),
+            update_interval=timedelta(seconds=poll_interval_seconds),
         )
         self._api = api
         self._system = system

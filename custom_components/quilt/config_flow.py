@@ -1,22 +1,31 @@
 from __future__ import annotations
 
 import voluptuous as vol
-
 from homeassistant import config_entries
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.data_entry_flow import FlowResult
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-from .cognito import CognitoChallenge, CognitoError, initiate_custom_auth, respond_to_custom_challenge
+from .cognito import (
+    CognitoChallenge,
+    CognitoError,
+    initiate_custom_auth,
+    respond_to_custom_challenge,
+)
 from .const import (
     CONF_ACCEPT_TERMS,
     CONF_EMAIL,
+    CONF_ENABLE_DEBUG_DUMPS,
     CONF_ENABLE_NOTIFIER,
     CONF_ID_TOKEN,
+    CONF_POLL_INTERVAL_SECONDS,
     CONF_REFRESH_TOKEN,
+    DEFAULT_ENABLE_DEBUG_DUMPS,
     DEFAULT_ENABLE_NOTIFIER,
     DEFAULT_HOST,
+    DEFAULT_POLL_INTERVAL_SECONDS,
     DOMAIN,
+    MIN_POLL_INTERVAL_SECONDS,
 )
 
 
@@ -174,7 +183,21 @@ class QuiltOptionsFlowHandler(config_entries.OptionsFlow):
             {
                 vol.Required(
                     CONF_ENABLE_NOTIFIER,
-                    default=self._config_entry.options.get(CONF_ENABLE_NOTIFIER, DEFAULT_ENABLE_NOTIFIER),
+                    default=self._config_entry.options.get(
+                        CONF_ENABLE_NOTIFIER, DEFAULT_ENABLE_NOTIFIER
+                    ),
+                ): bool,
+                vol.Required(
+                    CONF_POLL_INTERVAL_SECONDS,
+                    default=self._config_entry.options.get(
+                        CONF_POLL_INTERVAL_SECONDS, DEFAULT_POLL_INTERVAL_SECONDS
+                    ),
+                ): vol.All(vol.Coerce(int), vol.Range(min=MIN_POLL_INTERVAL_SECONDS)),
+                vol.Required(
+                    CONF_ENABLE_DEBUG_DUMPS,
+                    default=self._config_entry.options.get(
+                        CONF_ENABLE_DEBUG_DUMPS, DEFAULT_ENABLE_DEBUG_DUMPS
+                    ),
                 ): bool,
             }
         )

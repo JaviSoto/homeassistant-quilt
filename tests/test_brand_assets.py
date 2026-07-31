@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+import json
 import subprocess
 from pathlib import Path
 from zipfile import ZipFile
-
 
 ROOT = Path(__file__).resolve().parents[1]
 COMPONENT_DIR = ROOT / "custom_components" / "quilt"
@@ -15,6 +15,13 @@ def test_brand_assets_use_ha_2026_3_layout() -> None:
     assert (COMPONENT_DIR / "brand" / "logo.png").is_file()
     assert not (COMPONENT_DIR / "icon.png").exists()
     assert not (COMPONENT_DIR / "logo.png").exists()
+
+
+def test_manifest_declares_runtime_dependency_and_release_version() -> None:
+    manifest = json.loads((COMPONENT_DIR / "manifest.json").read_text(encoding="utf-8"))
+
+    assert manifest["requirements"] == ["grpcio>=1.60.0"]
+    assert manifest["version"] == "1.0.3"
 
 
 def test_release_zip_includes_brand_assets(tmp_path: Path) -> None:

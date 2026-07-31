@@ -43,10 +43,11 @@
       "init": {
         "title": "Quilt options",
         "data": {
-          "enable_notifier": "Enable real-time updates (notifier stream)"
+          "enable_notifier": "Enable real-time updates (notifier stream)",
+          "poll_interval_seconds": "Cloud poll interval (seconds)",
+          "enable_debug_dumps": "Save Quilt protocol debug dumps"
         }
       }
     }
   }
 }
-
