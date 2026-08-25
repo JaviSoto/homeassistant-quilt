@@ -1,0 +1,3 @@
+[tasks.ci]
+description = "Run tests, compatibility checks, and hassfest validation"
+run = "./ci/run_ci.sh"
