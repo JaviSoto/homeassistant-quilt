@@ -21,10 +21,10 @@ def test_manifest_declares_runtime_dependency_and_release_version() -> None:
     manifest = json.loads((COMPONENT_DIR / "manifest.json").read_text(encoding="utf-8"))
 
     assert manifest["requirements"] == ["grpcio==1.78.0"]
-    assert manifest["version"] == "1.0.4"
+    assert manifest["version"] == "1.0.5"
 
 
-def test_release_zip_includes_brand_assets(tmp_path: Path) -> None:
+def test_release_zip_uses_hacs_zip_release_layout(tmp_path: Path) -> None:
     zip_path = tmp_path / "quilt.zip"
     subprocess.run(
         ["bash", str(ROOT / "scripts" / "build_release_zip.sh"), str(zip_path)],
@@ -35,7 +35,10 @@ def test_release_zip_includes_brand_assets(tmp_path: Path) -> None:
     with ZipFile(zip_path) as zip_file:
         names = set(zip_file.namelist())
 
-    assert "custom_components/quilt/brand/icon.png" in names
-    assert "custom_components/quilt/brand/logo.png" in names
-    assert "custom_components/quilt/icon.png" not in names
-    assert "custom_components/quilt/logo.png" not in names
+    assert "__init__.py" in names
+    assert "manifest.json" in names
+    assert "brand/icon.png" in names
+    assert "brand/logo.png" in names
+    assert "icon.png" not in names
+    assert "logo.png" not in names
+    assert not any(name.startswith("custom_components/") for name in names)

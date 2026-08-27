@@ -10,14 +10,13 @@ fi
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
-mkdir -p "$TMP/custom_components"
-cp -R "$ROOT/custom_components/quilt" "$TMP/custom_components/quilt"
+cp -R "$ROOT/custom_components/quilt/." "$TMP/"
 
 # Exclude local bytecode/cache files from the release artifact.
-find "$TMP/custom_components" -type d -name '__pycache__' -prune -exec rm -rf {} +
-find "$TMP/custom_components" -type f -name '*.pyc' -delete
+find "$TMP" -type d -name '__pycache__' -prune -exec rm -rf {} +
+find "$TMP" -type f -name '*.pyc' -delete
 
 rm -f "$OUT"
-(cd "$TMP" && zip -r -q "$OUT" custom_components)
+(cd "$TMP" && zip -r -q "$OUT" ./*)
 
 echo "Wrote $OUT"

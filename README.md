@@ -21,8 +21,7 @@ Maintainer note: I have been using this integration in my own Home Assistant set
 
 Brand assets follow Home Assistant 2026.3+ custom integration guidance and are shipped in `custom_components/quilt/brand/`.
 
-- **HACS (Custom repository)**: add this repo as a custom integration repo in HACS, then install “Quilt”.
-  - HACS → Integrations → (⋮) → **Custom repositories** → add `JaviSoto/homeassistant-quilt` as category **Integration**.
+- **HACS**: search for “Quilt” under integrations, then download it.
 - **Manual**: copy `custom_components/quilt/` into your Home Assistant `/config/custom_components/quilt/`, then restart HA Core.
 
 ## Setup
@@ -52,6 +51,9 @@ See `DISCLAIMER.md`.
 
 ## Development
 
+- Run the complete local verification gate before publishing:
+  - `mise run ci`
+  - The gate runs the tests, coverage check, minimum-version smoke check, and Hassfest.
 - Run unit tests + coverage:
   - `uv --directory . run --with-requirements requirements-dev.txt coverage run -m pytest -W error`
   - `uv --directory . run --with-requirements requirements-dev.txt coverage report --fail-under=86`
