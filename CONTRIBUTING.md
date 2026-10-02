@@ -30,6 +30,11 @@ uv --directory . run --with-requirements requirements-dev.txt coverage run -m py
 uv --directory . run --with-requirements requirements-dev.txt coverage report --fail-under=86
 ```
 
+The repository-owned `mise run ci` gate runs Hassfest with Miniserver's Docker
+service by default and removes its local and remote temporary workspaces on
+exit. Set `HASSFEST_REMOTE_HOST=local` only when explicitly using an available
+local Docker daemon.
+
 ### Minimum Home Assistant compatibility smoke
 
 The unit tests use a small fake Home Assistant package. Run this isolated smoke

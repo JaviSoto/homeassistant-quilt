@@ -21,7 +21,7 @@ def test_manifest_declares_runtime_dependency_and_release_version() -> None:
     manifest = json.loads((COMPONENT_DIR / "manifest.json").read_text(encoding="utf-8"))
 
     assert manifest["requirements"] == ["grpcio==1.78.0"]
-    assert manifest["version"] == "1.0.5"
+    assert manifest["version"] == "1.0.6"
 
 
 def test_release_zip_uses_hacs_zip_release_layout(tmp_path: Path) -> None:
@@ -36,6 +36,7 @@ def test_release_zip_uses_hacs_zip_release_layout(tmp_path: Path) -> None:
         names = set(zip_file.namelist())
 
     assert "__init__.py" in names
+    assert "diagnostics.py" in names
     assert "manifest.json" in names
     assert "brand/icon.png" in names
     assert "brand/logo.png" in names

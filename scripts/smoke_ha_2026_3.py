@@ -7,12 +7,14 @@ from homeassistant.data_entry_flow import FlowResultType
 
 from custom_components.quilt.config_flow import QuiltOptionsFlowHandler
 from custom_components.quilt.coordinator import QuiltCoordinator
+from custom_components.quilt.diagnostics import async_get_config_entry_diagnostics
 from custom_components.quilt.energy_coordinator import QuiltEnergyCoordinator
 
 
 def main() -> None:
     """Verify the real Home Assistant 2026.3 minimum API contracts."""
     assert issubclass(QuiltOptionsFlowHandler, config_entries.OptionsFlowWithReload)
+    assert callable(async_get_config_entry_diagnostics)
 
     result = QuiltOptionsFlowHandler().async_create_entry(
         data={"poll_interval_seconds": 10}

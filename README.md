@@ -12,6 +12,9 @@ Unofficial Home Assistant integration for Quilt HVAC.
 - **Fan** entities for each space (kept HA-only by default; see HomeKit notes).
 - **Sensor** entities for paired Quilt Bluetooth remote sensors, including
   temperature, humidity, and battery level.
+- Privacy-limited config-entry diagnostics with only room/unit state freshness
+  and the integration's existing online-rule results. It never includes raw
+  Quilt payloads, credentials, settings, temperatures, or actuator values.
 
 ## Installation
 
