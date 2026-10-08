@@ -138,6 +138,24 @@ def test_config_entry_diagnostics_reports_only_room_and_unit_health(
         system_id=system_id,
         updated=QuiltTimestamp(seconds=int(now.timestamp()) - 30, nanos=500_000_000),
     )
+    office_fresh_remote_sensor = SimpleNamespace(
+        header=SimpleNamespace(remote_sensor_id="office-sensor-a-private"),
+        state=SimpleNamespace(
+            updated=QuiltTimestamp(seconds=int(now.timestamp()) - 30, nanos=0),
+            rssi=-59,
+        ),
+    )
+    office_stale_remote_sensor = SimpleNamespace(
+        header=SimpleNamespace(remote_sensor_id="office-sensor-b-private"),
+        state=SimpleNamespace(
+            updated=QuiltTimestamp(seconds=int(now.timestamp()) - 400, nanos=0),
+            rssi=-64,
+        ),
+    )
+    den_remote_sensor = SimpleNamespace(
+        header=SimpleNamespace(remote_sensor_id="den-sensor-private"),
+        state=SimpleNamespace(updated=None, rssi=None),
+    )
     hds = QuiltHdsSystem(
         system_id=system_id,
         spaces={root_id: root, office_id: office, den_id: den},
@@ -152,6 +170,15 @@ def test_config_entry_diagnostics_reports_only_room_and_unit_health(
         comfort_settings={},
         comfort_settings_by_space={},
         topic_ids={},
+        controller_remote_sensors={
+            "office-sensor-a-private": office_fresh_remote_sensor,
+            "office-sensor-b-private": office_stale_remote_sensor,
+            "den-sensor-private": den_remote_sensor,
+        },
+        controller_remote_sensors_by_indoor_unit={
+            office_unit_id: [office_stale_remote_sensor, office_fresh_remote_sensor],
+            den_unit_id: [den_remote_sensor],
+        },
     )
     coordinator = SimpleNamespace(
         data=SimpleNamespace(
@@ -192,6 +219,14 @@ def test_config_entry_diagnostics_reports_only_room_and_unit_health(
                                 "state_updated_at": "2026-10-02T16:59:30.5Z",
                                 "state_updated_age_seconds": 29,
                                 "online_by_integration_rule": True,
+                                "controller_remote_sensors": [
+                                    {
+                                        "state_updated_at": None,
+                                        "state_updated_age_seconds": None,
+                                        "online_by_integration_rule": False,
+                                        "rssi": None,
+                                    }
+                                ],
                             }
                         ],
                     },
@@ -205,6 +240,20 @@ def test_config_entry_diagnostics_reports_only_room_and_unit_health(
                                 "state_updated_at": "2026-10-02T15:51:40Z",
                                 "state_updated_age_seconds": 4_100,
                                 "online_by_integration_rule": False,
+                                "controller_remote_sensors": [
+                                    {
+                                        "state_updated_at": "2026-10-02T16:59:30Z",
+                                        "state_updated_age_seconds": 30,
+                                        "online_by_integration_rule": True,
+                                        "rssi": -59,
+                                    },
+                                    {
+                                        "state_updated_at": "2026-10-02T16:53:20Z",
+                                        "state_updated_age_seconds": 400,
+                                        "online_by_integration_rule": False,
+                                        "rssi": -64,
+                                    },
+                                ],
                             }
                         ],
                     },

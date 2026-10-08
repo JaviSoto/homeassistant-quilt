@@ -72,6 +72,22 @@ def _coordinator_diagnostics(
                     now_seconds=now_seconds,
                 )
             )
+            controller_remote_sensors = (
+                hds.controller_remote_sensors_by_indoor_unit.get(
+                    unit.header.indoor_unit_id, []
+                )
+            )
+            unit_diagnostics["controller_remote_sensors"] = [
+                _controller_remote_sensor_diagnostics(
+                    hds,
+                    remote_sensor,
+                    now_seconds=now_seconds,
+                )
+                for remote_sensor in sorted(
+                    controller_remote_sensors,
+                    key=lambda sensor: sensor.header.remote_sensor_id,
+                )
+            ]
             indoor_units.append(unit_diagnostics)
 
         space_diagnostics = _timestamp_diagnostics(
@@ -96,10 +112,31 @@ def _coordinator_diagnostics(
     }
 
 
+def _controller_remote_sensor_diagnostics(
+    hds: Any, remote_sensor: Any, *, now_seconds: float
+) -> dict[str, Any]:
+    """Expose freshness and signal strength, not sensor identity or readings."""
+    state = remote_sensor.state
+    diagnostics = _timestamp_diagnostics(
+        state.updated if state is not None else None,
+        now_seconds=now_seconds,
+    )
+    diagnostics.update(
+        {
+            "online_by_integration_rule": hds.controller_remote_sensor_is_online(
+                remote_sensor.header.remote_sensor_id,
+                now_seconds=now_seconds,
+            ),
+            "rssi": state.rssi if state is not None else None,
+        }
+    )
+    return diagnostics
+
+
 async def async_get_config_entry_diagnostics(
     hass: HomeAssistant, entry: ConfigEntry
 ) -> dict[str, Any]:
-    """Return minimal room and indoor-unit status without credentials or payloads."""
+    """Return freshness metadata without credentials, identities, or readings."""
     runtime = hass.data.get(DOMAIN, {}).get(entry.entry_id, {})
     coordinators = runtime.get("coordinators", {})
     now_seconds = datetime.now(UTC).timestamp()

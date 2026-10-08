@@ -23,7 +23,7 @@ def test_manifest_declares_runtime_dependency_and_release_version() -> None:
     manifest = json.loads((COMPONENT_DIR / "manifest.json").read_text(encoding="utf-8"))
 
     assert manifest["requirements"] == ["grpcio>=1.78.0,<2.0"]
-    assert manifest["version"] == "1.0.7"
+    assert manifest["version"] == "1.0.8"
 
 
 def test_manifest_admits_home_assistant_2026_10_grpcio_runtime() -> None:
