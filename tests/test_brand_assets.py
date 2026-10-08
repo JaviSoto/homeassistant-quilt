@@ -5,6 +5,8 @@ import subprocess
 from pathlib import Path
 from zipfile import ZipFile
 
+from packaging.requirements import Requirement
+
 ROOT = Path(__file__).resolve().parents[1]
 COMPONENT_DIR = ROOT / "custom_components" / "quilt"
 
@@ -20,8 +22,21 @@ def test_brand_assets_use_ha_2026_3_layout() -> None:
 def test_manifest_declares_runtime_dependency_and_release_version() -> None:
     manifest = json.loads((COMPONENT_DIR / "manifest.json").read_text(encoding="utf-8"))
 
-    assert manifest["requirements"] == ["grpcio==1.78.0"]
-    assert manifest["version"] == "1.0.6"
+    assert manifest["requirements"] == ["grpcio>=1.78.0,<2.0"]
+    assert manifest["version"] == "1.0.7"
+
+
+def test_manifest_admits_home_assistant_2026_10_grpcio_runtime() -> None:
+    """The custom integration must accept Core's grpcio 1.83.1 dependency."""
+    manifest = json.loads((COMPONENT_DIR / "manifest.json").read_text(encoding="utf-8"))
+    requirements = [Requirement(value) for value in manifest["requirements"]]
+    grpc_requirements = [
+        requirement for requirement in requirements if requirement.name == "grpcio"
+    ]
+
+    assert len(grpc_requirements) == 1
+    assert grpc_requirements[0].specifier.contains("1.78.0")
+    assert grpc_requirements[0].specifier.contains("1.83.1")
 
 
 def test_release_zip_uses_hacs_zip_release_layout(tmp_path: Path) -> None:

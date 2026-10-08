@@ -56,13 +56,16 @@ See `DISCLAIMER.md`.
 
 - Run the complete local verification gate before publishing:
   - `mise run ci`
-  - The gate runs the tests, coverage check, minimum-version smoke check, and Hassfest.
+  - The gate runs the tests, coverage check, Home Assistant 2026.3 minimum and 2026.10 runtime smoke checks, and Hassfest.
 - Run unit tests + coverage:
   - `uv --directory . run --with-requirements requirements-dev.txt coverage run -m pytest -W error`
   - `uv --directory . run --with-requirements requirements-dev.txt coverage report --fail-under=86`
 - Check the real minimum Home Assistant API contracts:
   - `uv --directory . run --isolated --python 3.14 --with homeassistant==2026.3.0 --with grpcio==1.78.0 python -m scripts.smoke_ha_2026_3`
   - This is a narrow API smoke for the real Home Assistant 2026.3.0 floor, not a full Home Assistant runtime test.
+- Check the Home Assistant 2026.10 runtime and its `grpcio==1.83.1` dependency:
+  - `uv --directory . run --isolated --python 3.14 --exclude-newer-package homeassistant=2026-10-08T00:00:00Z --with homeassistant==2026.10.0 --with grpcio==1.83.1 python -m scripts.smoke_ha_2026_10`
+  - The Quilt component encodes protobuf messages directly; it has no generated gRPC stubs that impose a separate generator-version floor.
 
 ## Issues
 
